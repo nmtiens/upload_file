@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Upload File và Thông Tin</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        line-height: 1.6;
+        color: #333;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+      }
+
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        text-align: center;
+      }
+
+      .header h1 {
+        font-size: 2.5em;
+        margin-bottom: 10px;
+        font-weight: 300;
+      }
+
+      .header p {
+        font-size: 1.1em;
+        opacity: 0.9;
+      }
+
+      .form-container {
+        padding: 40px;
+      }
+
+      .form-group {
+        margin-bottom: 25px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #555;
+        font-size: 1.1em;
+      }
+
+      .required {
+        color: #e74c3c;
+      }
+
+      input[type="text"],
+      input[type="number"],
+      input[type="file"],
+      textarea,
+      select {
+        width: 100%;
+        padding: 12px 15px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        font-size: 1em;
+        transition: all 0.3s ease;
+        font-family: inherit;
+      }
+
+      input[type="text"]:focus,
+      input[type="number"]:focus,
+      input[type="file"]:focus,
+      textarea:focus,
+      select:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        transform: translateY(-2px);
+      }
+
+      textarea {
+        resize: vertical;
+        min-height: 100px;
+      }
+
+      .file-input-wrapper {
+        position: relative;
+        display: inline-block;
+        width: 100%;
+      }
+
+      .file-input-wrapper input[type="file"] {
+        opacity: 0;
+        position: absolute;
+        z-index: -1;
+      }
+
+      .file-input-label {
+        display: inline-block;
+        padding: 12px 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-align: center;
+        width: 100%;
+      }
+
+      .file-input-label:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+      }
+
+      .submit-btn {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 15px 30px;
+        font-size: 1.2em;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        width: 100%;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .submit-btn:hover:not(:disabled) {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+      }
+
+      .submit-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .submit-btn:active {
+        transform: translateY(-1px);
+      }
+
+      .message {
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        display: none;
+        position: relative;
+      }
+
+      .message.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+
+      .message.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+
+      .message.info {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+
+      .folder-selection {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+      }
+
+      .folder-select {
+        flex: 1;
+      }
+
+      .new-folder-btn {
+        background: #28a745;
+        color: white;
+        border: none;
+        padding: 12px 20px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-size: 1em;
+        white-space: nowrap;
+      }
+
+      .new-folder-btn:hover {
+        background: #218838;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
+      }
+
+      .refresh-folder-btn {
+        background: #17a2b8;
+        color: white;
+        border: none;
+        padding: 12px 15px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-size: 1em;
+      }
+
+      .refresh-folder-btn:hover {
+        background: #138496;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(23, 162, 184, 0.3);
+      }
+
+      .folder-info {
+        margin-top: 10px;
+        padding: 10px;
+        background: #e8f4fd;
+        border-radius: 5px;
+        color: #0c5460;
+        font-size: 0.9em;
+        display: none;
+      }
+
+      .file-selected {
+        margin-top: 10px;
+        padding: 10px;
+        background: #e8f5e8;
+        border-radius: 5px;
+        color: #2d5d2d;
+        display: none;
+      }
+
+      .file-info {
+        margin-top: 5px;
+        font-size: 0.9em;
+        color: #666;
+      }
+
+      .progress-bar {
+        width: 100%;
+        height: 6px;
+        background: #f0f0f0;
+        border-radius: 3px;
+        overflow: hidden;
+        margin-top: 10px;
+        display: none;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        width: 0%;
+        transition: width 0.3s ease;
+      }
+
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+      }
+
+      .modal-content {
+        background-color: white;
+        margin: 15% auto;
+        padding: 20px;
+        border-radius: 10px;
+        width: 80%;
+        max-width: 400px;
+        text-align: center;
+      }
+
+      .modal input {
+        width: 100%;
+        padding: 10px;
+        margin: 10px 0;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        font-size: 1em;
+      }
+
+      .modal-buttons {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        margin-top: 15px;
+      }
+
+      .modal-btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 1em;
+      }
+
+      .modal-btn.primary {
+        background: #28a745;
+        color: white;
+      }
+
+      .modal-btn.secondary {
+        background: #6c757d;
+        color: white;
+      }
+
+      @media (max-width: 768px) {
+        .form-row {
+          grid-template-columns: 1fr;
+        }
+
+        .folder-selection {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .container {
+          margin: 10px;
+        }
+
+        .form-container {
+          padding: 20px;
+        }
+
+        .header {
+          padding: 20px;
+        }
+
+        .header h1 {
+          font-size: 2em;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>📄 Upload Tài Liệu</h1>
+        <p>Vui lòng điền đầy đủ thông tin và tải lên tài liệu</p>
+      </div>
+
+      <div class="form-container">
+        <div id="message" class="message"></div>
+
+        <form id="uploadForm" enctype="multipart/form-data">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ho_ten"
+                >Họ và Tên <span class="required">*</span></label
+              >
+              <input type="text" id="ho_ten" name="ho_ten" required />
+            </div>
+
+            
+              <!-- Thêm trường Khoa/Phòng vào form - THÊM SAU TRƯỜNG "Nơi Công Tác" -->
+              <div class="form-group">
+                <label for="khoa_phong">Khoa/Phòng <span class="required">*</span></label>
+                <input type="text" id="khoa_phong" name="khoa_phong" required placeholder="Nhập tên khoa/phòng..." />
+              </div>
+
+              <div class="form-group">
+                <label for="noi_cong_tac">Nơi Cộng Tác</label>
+                <input
+                  type="text"
+                  id="noi_cong_tac"
+                  name="noi_cong_tac"
+                />
+              </div>
+              
+          </div>
+
+          <div class="form-group">
+            <label for="ten_de_tai"
+              >Tên Đề Tài <span class="required">*</span></label
+            >
+            <input type="text" id="ten_de_tai" name="ten_de_tai" required />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="gio_quy_doi">Giờ Quy Đổi</label>
+              <input
+                type="number"
+                id="gio_quy_doi"
+                name="gio_quy_doi"
+                step="0.1"
+                min="0"
+                value="0"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="minh_chung">Minh Chứng</label>
+              <input type="text" id="minh_chung" name="minh_chung" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="ghi_chu">Ghi Chú</label>
+            <textarea
+              id="ghi_chu"
+              name="ghi_chu"
+              placeholder="Nhập ghi chú thêm (nếu có)..."
+            ></textarea>
+          </div>
+
+          <!-- Chọn thư mục -->
+          <div class="form-group">
+            <label
+              >📁 Chọn Thư Mục Lưu Trữ <span class="required">*</span></label
+            >
+            <div class="folder-selection">
+              <div class="folder-select">
+                <select id="folder_select" name="folder" required>
+                  <option value="">📁 Chọn thư mục...</option>
+                </select>
+              </div>
+              <button
+                type="button"
+                class="new-folder-btn"
+                onclick="showNewFolderModal()"
+              >
+                ➕ Tạo mới
+              </button>
+              <button
+                type="button"
+                class="refresh-folder-btn"
+                onclick="loadFolders()"
+              >
+                🔄
+              </button>
+            </div>
+            <div id="folderInfo" class="folder-info"></div>
+          </div>
+
+          <!-- File upload -->
+          <div class="form-group">
+            <label>Tải Lên Tệp Tin <span class="required">*</span></label>
+            <div class="file-input-wrapper">
+              <input
+                type="file"
+                id="file"
+                name="file"
+                accept=".txt,.pdf,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx"
+                required
+              />
+              <label for="file" class="file-input-label">
+                📎 Chọn tệp tin để tải lên
+              </label>
+            </div>
+            <div id="fileSelected" class="file-selected"></div>
+            <div class="progress-bar" id="progressBar">
+              <div class="progress-fill" id="progressFill"></div>
+            </div>
+          </div>
+
+          <button type="submit" class="submit-btn">🚀 Gửi Thông Tin</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal tạo thư mục mới -->
+    <div id="newFolderModal" class="modal">
+      <div class="modal-content">
+        <h3>📁 Tạo Thư Mục Mới</h3>
+        <input
+          type="text"
+          id="newFolderName"
+          placeholder="Nhập tên thư mục..."
+          maxlength="50"
+        />
+        <div class="modal-buttons">
+          <button class="modal-btn primary" onclick="createNewFolder()">
+            Tạo
+          </button>
+          <button class="modal-btn secondary" onclick="hideNewFolderModal()">
+            Hủy
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Khởi tạo khi trang load
+      // Khởi tạo khi trang load - PHIÊN BẢN ĐÃ SỬA
+document.addEventListener("DOMContentLoaded", function () {
+  // Check UTF-8 support
+  if (!checkUTF8Support()) {
+    showMessage("error", "Trình duyệt có thể không hỗ trợ đầy đủ ký tự tiếng Việt");
+  }
+  
+  loadFolders();
+  initializeFileHandling();
+});
+
+      // Khởi tạo xử lý file
+      function initializeFileHandling() {
+        const fileInput = document.getElementById("file");
+        const fileSelected = document.getElementById("fileSelected");
+
+        fileInput.addEventListener("change", function (e) {
+          const file = e.target.files[0];
+          if (file) {
+            displayFileInfo(file);
+            validateFile(file);
+          } else {
+            hideFileInfo();
+          }
+        });
+      }
+
+      // Hiển thị thông tin file đã chọn
+      function displayFileInfo(file) {
+        const fileSelected = document.getElementById("fileSelected");
+        const fileName = file.name;
+        const fileSize = formatFileSize(file.size);
+        const fileSizeBytes = file.size.toLocaleString();
+        const fileType = file.type || "Không xác định";
+
+        fileSelected.innerHTML = `
+    <div><strong>✅ Đã chọn:</strong> ${fileName}</div>
+    <div class="file-info">
+      📊 Kích thước: ${fileSize} (${fileSizeBytes} bytes) | 📄 Loại: ${fileType}
+    </div>
+  `;
+        fileSelected.style.display = "block";
+      }
+
+      // Ẩn thông tin file
+      function hideFileInfo() {
+        document.getElementById("fileSelected").style.display = "none";
+      }
+
+      // Validate file
+      function validateFile(file) {
+        const maxSize = 16 * 1024 * 1024; // 16MB
+        const fileSizeBytes = file.size;
+        const allowedTypes = [
+          "text/plain",
+          "application/pdf",
+          "image/png",
+          "image/jpeg",
+          "image/gif",
+          "application/msword",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "application/vnd.ms-excel",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ];
+
+        if (fileSizeBytes > maxSize) {
+          showMessage(
+            "error",
+            `File quá lớn!\n` +
+              `Kích thước hiện tại: ${formatFileSize(
+                fileSizeBytes
+              )} (${fileSizeBytes.toLocaleString()} bytes)\n` +
+              `Kích thước tối đa: ${formatFileSize(
+                maxSize
+              )} (${maxSize.toLocaleString()} bytes)`
+          );
+          return false;
+        }
+
+        const fileExtension = file.name.split(".").pop().toLowerCase();
+        const allowedExtensions = [
+          "txt",
+          "pdf",
+          "png",
+          "jpg",
+          "jpeg",
+          "gif",
+          "doc",
+          "docx",
+          "xls",
+          "xlsx",
+        ];
+
+        if (!allowedExtensions.includes(fileExtension)) {
+          showMessage(
+            "error",
+            `Loại file không được hỗ trợ! Chỉ chấp nhận: ${allowedExtensions.join(
+              ", "
+            )}`
+          );
+          return false;
+        }
+
+        const fileMetadata = getFileMetadata(file);
+        console.log("File metadata:", fileMetadata);
+
+        return true;
+      }
+
+      // Hàm helper để lấy metadata file
+      function getFileMetadata(file) {
+        return {
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          lastModified: file.lastModified,
+          lastModifiedDate: new Date(file.lastModified).toISOString(),
+        };
+      }
+
+      // Format file size
+      function formatFileSize(bytes) {
+        if (bytes === 0) return "0 B";
+        const k = 1024;
+        const sizes = ["B", "KB", "MB", "GB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+      }
+
+      // Load danh sách thư mục
+      
+      // 2. Sửa hàm loadFolders() để đảm bảo hiển thị đúng tên có dấu
+async function loadFolders() {
+  try {
+    showLoadingMessage("Đang tải danh sách thư mục...");
+
+    const response = await fetch("/api/folders", {
+      headers: {
+        "Accept": "application/json; charset=utf-8",
+        "Accept-Charset": "utf-8"
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    // Đảm bảo response được decode đúng
+    const text = await response.text();
+    let folders;
+    try {
+      folders = JSON.parse(text);
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError);
+      console.log("Response text:", text);
+      throw new Error("Server không trả về JSON hợp lệ");
+    }
+
+    const select = document.getElementById("folder_select");
+    const currentValue = select.value;
+
+    select.innerHTML = '<option value="">📁 Chọn thư mục...</option>';
+
+    if (folders && folders.length > 0) {
+      folders.forEach((folder) => {
+        const option = document.createElement("option");
+        option.value = folder.name;
+        
+        // Đảm bảo text hiển thị đúng với UTF-8
+        const displayText = `📁 ${folder.name} (${folder.file_count || 0} files)`;
+        option.textContent = displayText;
+        
+        select.appendChild(option);
+      });
+
+      if (currentValue) {
+        select.value = currentValue;
+      }
+    } else {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "📁 Chưa có thư mục nào";
+      option.disabled = true;
+      select.appendChild(option);
+    }
+
+    updateFolderInfo();
+    hideMessage();
+  } catch (error) {
+    console.error("Lỗi khi tải danh sách thư mục:", error);
+    showMessage("error", "Không thể tải danh sách thư mục: " + error.message);
+  }
+}
+
+// 3. Thêm helper function để check UTF-8 support
+function checkUTF8Support() {
+  try {
+    // Test encoding/decoding Vietnamese characters
+    const testString = "Thư mục có dấu: áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệ";
+    const encoded = encodeURIComponent(testString);
+    const decoded = decodeURIComponent(encoded);
+    
+    if (decoded !== testString) {
+      console.warn("UTF-8 encoding/decoding may not work properly");
+      return false;
+    }
+    
+    console.log("UTF-8 support verified");
+    return true;
+  } catch (error) {
+    console.error("UTF-8 check failed:", error);
+    return false;
+  }
+}
+
+
+
+
+      // Hiển thị thông báo loading
+      function showLoadingMessage(text) {
+        showMessage("info", text);
+      }
+
+      // Cập nhật thông tin thư mục
+      function updateFolderInfo() {
+        const select = document.getElementById("folder_select");
+        const info = document.getElementById("folderInfo");
+
+        if (select.value) {
+          const selectedOption = select.options[select.selectedIndex];
+          const folderName = select.value;
+          const fileCountMatch =
+            selectedOption.textContent.match(/\((\d+) files\)/);
+          const fileCount = fileCountMatch ? fileCountMatch[1] : "0";
+
+          info.innerHTML = `📂 Thư mục được chọn: <strong>${folderName}</strong> (${fileCount} tệp tin)`;
+          info.style.display = "block";
+        } else {
+          info.style.display = "none";
+        }
+      }
+
+      // Event listener cho folder select
+      document
+        .getElementById("folder_select")
+        .addEventListener("change", updateFolderInfo);
+
+      // Modal functions
+      function showNewFolderModal() {
+        document.getElementById("newFolderModal").style.display = "block";
+        document.getElementById("newFolderName").focus();
+      }
+
+      function hideNewFolderModal() {
+        document.getElementById("newFolderModal").style.display = "none";
+        document.getElementById("newFolderName").value = "";
+      }
+
+      // Tạo thư mục mới - PHIÊN BẢN ĐÃ SỬA HỖ TRỢ TIẾNG VIỆT
+      async function createNewFolder() {
+        const folderName = document.getElementById("newFolderName").value.trim();
+      
+        console.log("Tên thư mục nhập vào:", folderName);
+      
+        if (!folderName) {
+          alert("Vui lòng nhập tên thư mục!");
+          return;
+        }
+      
+        // Validation tên thư mục
+        const invalidChars = /[<>:"/\\|?*\x00-\x1f]/g;
+        if (invalidChars.test(folderName)) {
+          alert('Tên thư mục không được chứa các ký tự: < > : " / \\ | ? * hoặc ký tự điều khiển');
+          return;
+        }
+      
+        const reservedNames = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
+        if (reservedNames.test(folderName)) {
+          alert("Tên thư mục không được là tên đặc biệt của hệ thống!");
+          return;
+        }
+      
+        const utf8Length = new Blob([folderName]).size;
+        if (utf8Length > 255) {
+          alert(`Tên thư mục quá dài! Hiện tại: ${utf8Length} bytes, tối đa: 255 bytes.`);
+          return;
+        }
+      
+        if (/^[\s.]+$/.test(folderName)) {
+          alert("Tên thư mục không được chỉ chứa dấu cách hoặc dấu chấm!");
+          return;
+        }
+      
+        if (/[\s.]$/.test(folderName)) {
+          alert("Tên thư mục không được kết thúc bằng dấu cách hoặc dấu chấm!");
+          return;
+        }
+      
+        console.log("Validation passed, gửi request...");
+      
+        try {
+          showLoadingMessage("Đang tạo thư mục...");
+      
+          // FIX: Sử dụng URL encoding cho tên thư mục có dấu
+          const encodedFolderName = encodeURIComponent(folderName);
+          
+          const response = await fetch("/api/folders", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              "Accept": "application/json; charset=utf-8",
+              "Accept-Charset": "utf-8"
+            },
+            body: JSON.stringify({
+              name: folderName,
+              encoded_name: encodedFolderName // Gửi thêm tên đã encode
+            }),
+          });
+      
+          console.log("Response status:", response.status);
+      
+          let result;
+          try {
+            const responseText = await response.text();
+            result = JSON.parse(responseText);
+            console.log("Response data:", result);
+          } catch (jsonError) {
+            console.error("Lỗi parse JSON:", jsonError);
+            throw new Error("Server không trả về JSON hợp lệ");
+          }
+      
+          if (response.ok) {
+            showMessage("success", `Đã tạo thư mục "${folderName}" thành công`);
+            hideNewFolderModal();
+      
+            console.log("Reloading folders...");
+            await loadFolders();
+      
+            // Chọn thư mục vừa tạo
+            document.getElementById("folder_select").value = folderName;
+            updateFolderInfo();
+      
+            console.log("Tạo thư mục thành công!");
+          } else {
+            console.error("Server error:", result);
+            let errorMessage = result.error || `Lỗi ${response.status}: Không thể tạo thư mục`;
+      
+            if (response.status === 409) {
+              errorMessage = `Thư mục "${folderName}" đã tồn tại!`;
+            } else if (response.status === 400) {
+              errorMessage = `Tên thư mục "${folderName}" không hợp lệ!`;
+            }
+      
+            showMessage("error", errorMessage);
+          }
+        } catch (error) {
+          console.error("Network/Client error:", error);
+          showMessage("error", "Lỗi kết nối: " + error.message);
+        }
+      }
+      // Event listeners cho modal
+      document
+        .getElementById("newFolderName")
+        .addEventListener("keypress", function (e) {
+          if (e.key === "Enter") {
+            createNewFolder();
+          }
+        });
+
+      window.addEventListener("click", function (e) {
+        const modal = document.getElementById("newFolderModal");
+        if (e.target === modal) {
+          hideNewFolderModal();
+        }
+      });
+
+      // Hiển thị/ẩn message
+      function showMessage(type, text) {
+        const messageDiv = document.getElementById("message");
+        messageDiv.className = `message ${type}`;
+
+        const icons = {
+          success: "✅",
+          error: "❌",
+          info: "ℹ️",
+        };
+
+        messageDiv.textContent = `${icons[type] || ""} ${text}`;
+        messageDiv.style.display = "block";
+
+        if (type !== "info") {
+          setTimeout(() => {
+            hideMessage();
+          }, 5000);
+        }
+
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      function hideMessage() {
+        document.getElementById("message").style.display = "none";
+      }
+
+      // Progress bar functions
+      function showProgress() {
+        document.getElementById("progressBar").style.display = "block";
+      }
+
+      function updateProgress(percent) {
+        document.getElementById("progressFill").style.width = percent + "%";
+      }
+
+      function hideProgress() {
+        document.getElementById("progressBar").style.display = "none";
+        updateProgress(0);
+      }
+
+      // Form submission handler - FIX CHÍNH TẠI ĐÂY
+      document.getElementById("uploadForm").addEventListener("submit", async function (e) {
+  e.preventDefault();
+
+  // Validate required fields - THÊM khoa_phong vào danh sách
+  const requiredFields = [
+    "ho_ten",
+    "ten_de_tai", 
+    "khoa_phong", // THÊM MỚI
+    "folder_select",
+    "file",
+  ];
+  let isValid = true;
+
+  for (const fieldId of requiredFields) {
+    const field = document.getElementById(fieldId);
+    if (!field.value || (fieldId === "file" && !field.files[0])) {
+      field.style.borderColor = "#e74c3c";
+      isValid = false;
+    } else {
+      field.style.borderColor = "#ddd";
+    }
+  }
+
+  if (!isValid) {
+    showMessage(
+      "error",
+      "Vui lòng điền đầy đủ tất cả thông tin bắt buộc!"
+    );
+    return;
+  }
+
+  // Validate file
+  const fileInput = document.getElementById("file");
+  if (fileInput.files[0] && !validateFile(fileInput.files[0])) {
+    return;
+  }
+
+  const submitBtn = this.querySelector(".submit-btn");
+
+  // Tạo FormData và xử lý dữ liệu với UTF-8 encoding
+  const formData = new FormData();
+
+  // Thêm các trường text với encoding UTF-8 explicit - THÊM KHOA_PHONG
+  const selectedFolder = document.getElementById("folder_select").value;
+  
+  const textFields = {
+    ho_ten: document.getElementById("ho_ten").value.trim(),
+    noi_cong_tac: document.getElementById("noi_cong_tac").value.trim(),
+    khoa_phong: document.getElementById("khoa_phong").value.trim(), // THÊM MỚI
+    ten_de_tai: document.getElementById("ten_de_tai").value.trim(),
+    minh_chung: document.getElementById("minh_chung").value.trim(),
+    ghi_chu: document.getElementById("ghi_chu").value.trim(),
+    folder: selectedFolder,
+    folder_encoded: encodeURIComponent(selectedFolder) // FIX: Thêm tên thư mục đã encode
+  };
+
+  // Đảm bảo tất cả text fields được encode đúng
+  Object.entries(textFields).forEach(([key, value]) => {
+    formData.append(key, value);
+  });
+
+  // Xử lý trường số
+  const gioQuyDoiValue = document.getElementById("gio_quy_doi").value;
+  const gioQuyDoiNumber = gioQuyDoiValue === "" ? 0 : parseFloat(gioQuyDoiValue);
+
+  if (isNaN(gioQuyDoiNumber)) {
+    showMessage("error", "Giờ quy đổi phải là một số hợp lệ!");
+    return;
+  }
+
+  formData.append("gio_quy_doi", gioQuyDoiNumber.toString());
+
+  // Thêm file
+  if (fileInput.files[0]) {
+    formData.append("file", fileInput.files[0]);
+    formData.append("file_size", fileInput.files[0].size.toString());
+  }
+
+  // Set loading state
+  submitBtn.disabled = true;
+  submitBtn.textContent = "⏳ Đang gửi...";
+  showProgress();
+  showLoadingMessage("Đang upload file và lưu thông tin...");
+
+  try {
+    // Progress simulation
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+      progress += Math.random() * 15;
+      if (progress < 90) {
+        updateProgress(Math.min(progress, 90));
+      }
+    }, 200);
+
+    const response = await fetch("/upload", {
+      method: "POST",
+      headers: {
+        "Accept": "application/json; charset=utf-8",
+        "Accept-Charset": "utf-8"
+      },
+      body: formData,
+    });
+
+    clearInterval(progressInterval);
+    updateProgress(100);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    let result;
+    try {
+      const responseText = await response.text();
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError);
+      throw new Error("Server không trả về JSON hợp lệ");
+    }
+
+    if (result.error) {
+      showMessage("error", result.error);
+    } else {
+      // Success
+      showMessage("success", result.message || "Upload thành công!");
+
+      // Show upload details
+      if (result.files && result.files.length > 0) {
+        const fileInfo = result.files[0];
+        const fileSize = fileInfo.size || fileInput.files[0].size;
+        const folderName = result.folder || "Root";
+
+        setTimeout(() => {
+          showMessage(
+            "info",
+            `📁 Đã lưu vào thư mục: ${folderName}\n` +
+            `📄 File: ${fileInfo.original_name}\n` +
+            `📊 Kích thước: ${formatFileSize(fileSize)} (${fileSize.toLocaleString()} bytes)`
+          );
+        }, 2000);
+      }
+
+      // Reset form
+      this.reset();
+      hideFileInfo();
+      document.getElementById("folder_select").value = "";
+      updateFolderInfo();
+
+      // Reset field borders
+      requiredFields.forEach((fieldId) => {
+        document.getElementById(fieldId).style.borderColor = "#ddd";
+      });
+    }
+  } catch (error) {
+    console.error("Upload error:", error);
+    showMessage("error", `Lỗi kết nối: ${error.message}`);
+  } finally {
+    // Reset button and progress
+    submitBtn.disabled = false;
+    submitBtn.textContent = "🚀 Gửi Thông Tin";
+    setTimeout(() => {
+      hideProgress();
+    }, 1000);
+  }
+});
+
+
+      // Form validation real-time
+      document
+      .querySelectorAll("input[required], select[required]") // Chỉ áp dụng cho các field có required
+      .forEach((field) => {
+        field.addEventListener("blur", function () {
+          if (this.value.trim()) {
+            this.style.borderColor = "#28a745";
+          } else {
+            this.style.borderColor = "#e74c3c";
+          }
+        });
+    
+        field.addEventListener("input", function () {
+          if (this.value.trim()) {
+            this.style.borderColor = "#ddd";
+          }
+        });
+      });
+
+      // Additional validation for number field
+      document
+        .getElementById("gio_quy_doi")
+        .addEventListener("input", function () {
+          const value = this.value;
+          if (
+            value !== "" &&
+            (isNaN(parseFloat(value)) || parseFloat(value) < 0)
+          ) {
+            this.style.borderColor = "#e74c3c";
+            showMessage("error", "Giờ quy đổi phải là số không âm!");
+          } else {
+            this.style.borderColor = "#ddd";
+            hideMessage();
+          }
+        });
+    </script>
+  </body>
+</html>
