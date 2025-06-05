@@ -1248,4 +1248,17 @@ def internal_error(e):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    
+    # Kiểm tra nếu đang chạy trên Render (có PORT env var)
+    if os.environ.get('PORT'):  # Render luôn set PORT
+        print(f"🚀 Starting File Upload Server in Production Mode...")
+        print(f"🌐 Server running on port: {port}")
+        app.run(host='0.0.0.0', port=port, debug=False)
+    else:
+        print(f"\n🚀 Starting File Upload Server...")
+        print(f"📁 Files will be saved to: {app.config['UPLOAD_FOLDER']}")
+        print(f"🗄️ Database location: {DB_PATH}")
+        print(f"🌐 Server will be available at: http://localhost:5000")
+        print(f"🌍 Or from other devices: http://[YOUR_IP]:5000")
+        print("\n" + "="*60 + "\n")
+        app.run(debug=True, host='0.0.0.0', port=5000)
