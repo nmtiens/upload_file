@@ -13,57 +13,218 @@ import io
 import uuid
 from supabase import create_client, Client
 import tempfile
-from dotenv import load_dotenv
 
 app = Flask(__name__)
-load_dotenv()
-# Cấu hình Supabase
-SUPABASE_URL = os.environ.get('SUPABASE_URL')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
+
+# Cấu hình Supabase với giá trị mặc định và kiểm tra tốt hơn
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 SUPABASE_BUCKET = os.environ.get('SUPABASE_BUCKET', 'file-uploads')
 
+# Kiểm tra và hướng dẫn cấu hình
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("Vui lòng cấu hình SUPABASE_URL và SUPABASE_KEY trong environment variables")
+    print("=" * 60)
+    print("❌ CẢNH BÁO: Thiếu cấu hình Supabase!")
+    print("=" * 60)
+    print("Vui lòng cấu hình các biến môi trường sau:")
+    print("")
+    print("🔧 CÁCH 1: Sử dụng file .env")
+    print("Tạo file .env trong thư mục gốc với nội dung:")
+    print("SUPABASE_URL=https://your-project-ref.supabase.co")
+    print("SUPABASE_KEY=your-anon-public-key")
+    print("SUPABASE_BUCKET=file-uploads")
+    print("")
+    print("🔧 CÁCH 2: Set biến môi trường (Windows)")
+    print("set SUPABASE_URL=https://your-project-ref.supabase.co")
+    print("set SUPABASE_KEY=your-anon-public-key")
+    print("set SUPABASE_BUCKET=file-uploads")
+    print("")
+    print("🔧 CÁCH 3: Set biến môi trường (Linux/Mac)")
+    print("export SUPABASE_URL=https://your-project-ref.supabase.co")
+    print("export SUPABASE_KEY=your-anon-public-key")
+    print("export SUPABASE_BUCKET=file-uploads")
+    print("")
+    print("📋 Lấy thông tin Supabase:")
+    print("1. Đăng nhập vào https://supabase.com")
+    print("2. Chọn project của bạn")
+    print("3. Vào Settings > API")
+    print("4. Copy URL và anon/public key")
+    print("")
+    print("=" * 60)
+    
+    # Cho phép chạy ở chế độ demo (không kết nối Supabase)
+    print("🚀 Khởi động ở chế độ DEMO (không có Supabase)")
+    print("Ứng dụng sẽ chạy nhưng không thể upload file thật")
+    print("=" * 60)
+    
+    # Tạo mock supabase client để tránh lỗi
+    class MockSupabase:
+        def __init__(self):
+            self.storage_instance = MockStorage()
+            self.table_instance = MockTable()
+        
+        def storage(self):
+            return self.storage_instance
+        
+        def table(self, table_name):
+            return self.table_instance
+    
+    class MockStorage:
+        def from_(self, bucket):
+            return MockBucket()
+    
+    class MockBucket:
+        def upload(self, path, file, file_options=None):
+            return MockResult(200)
+        
+        def get_public_url(self, path):
+            return f"https://demo.example.com/{path}"
+        
+        def list(self, path=""):
+            return []
+        
+        def download(self, path):
+            return b"Demo file content"
+    
+    class MockTable:
+        def insert(self, data):
+            return MockResult(200, data)
+        
+        def select(self, fields="*"):
+            return self
+        
+        def eq(self, field, value):
+            return self
+        
+        def single(self):
+            return self
+        
+        def limit(self, count):
+            return self
+        
+        def order(self, field, desc=False):
+            return self
+        
+        def execute(self):
+            return MockResult(200, [])
+    
+    class MockResult:
+        def __init__(self, status_code, data=None):
+            self.status_code = status_code
+            self.data = data or []
+    
+    supabase = MockSupabase()
+    DEMO_MODE = True
+else:
+    # Khởi tạo Supabase client thật
+    try:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        DEMO_MODE = False
+        print(f"✅ Kết nối Supabase thành công!")
+        print(f"📍 URL: {SUPABASE_URL}")
+        print(f"🗂️ Bucket: {SUPABASE_BUCKET}")
+    except Exception as e:
+        print(f"❌ Lỗi kết nối Supabase: {str(e)}")
+        print("🔄 Chuyển sang chế độ DEMO")
+        # Sử dụng mock client
+        DEMO_MODE = True
 
-# Khởi tạo Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-def secure_folder_name(filename):
-    """Làm sạch tên thư mục nhưng giữ lại dấu tiếng Việt"""
-    if not filename:
-        return ""
+def secure_folder_name(folder_name):
+    """
+    Chuyển đổi tên thư mục thành format an toàn cho Supabase Storage
+    """
+    if not folder_name or not isinstance(folder_name, str):
+        return None
     
-    # Chỉ loại bỏ các ký tự thực sự nguy hiểm
-    # Giữ lại chữ cái có dấu, số, khoảng trắng, gạch ngang, gạch dưới
-    filename = re.sub(r'[<>:"/\\|?*]', '', filename)  # Loại bỏ ký tự không an toàn cho tên file/folder
-    filename = re.sub(r'\.\.+', '.', filename)  # Loại bỏ nhiều dấu chấm liên tiếp
-    filename = filename.strip('. ')  # Loại bỏ dấu chấm và khoảng trắng ở đầu/cuối
+    # Bước 1: Loại bỏ khoảng trắng đầu/cuối
+    folder_name = folder_name.strip()
     
-    # Thay thế nhiều khoảng trắng bằng một khoảng trắng
-    filename = re.sub(r'\s+', ' ', filename)
+    if not folder_name:
+        return None
     
-    return filename
+    # Bước 2: Chuyển đổi tiếng Việt có dấu thành không dấu
+    vietnamese_map = {
+        'à': 'a', 'á': 'a', 'ả': 'a', 'ã': 'a', 'ạ': 'a',
+        'ă': 'a', 'ằ': 'a', 'ắ': 'a', 'ẳ': 'a', 'ẵ': 'a', 'ặ': 'a',
+        'â': 'a', 'ầ': 'a', 'ấ': 'a', 'ẩ': 'a', 'ẫ': 'a', 'ậ': 'a',
+        'è': 'e', 'é': 'e', 'ẻ': 'e', 'ẽ': 'e', 'ẹ': 'e',
+        'ê': 'e', 'ề': 'e', 'ế': 'e', 'ể': 'e', 'ễ': 'e', 'ệ': 'e',
+        'ì': 'i', 'í': 'i', 'ỉ': 'i', 'ĩ': 'i', 'ị': 'i',
+        'ò': 'o', 'ó': 'o', 'ỏ': 'o', 'õ': 'o', 'ọ': 'o',
+        'ô': 'o', 'ồ': 'o', 'ố': 'o', 'ổ': 'o', 'ỗ': 'o', 'ộ': 'o',
+        'ơ': 'o', 'ờ': 'o', 'ớ': 'o', 'ở': 'o', 'ỡ': 'o', 'ợ': 'o',
+        'ù': 'u', 'ú': 'u', 'ủ': 'u', 'ũ': 'u', 'ụ': 'u',
+        'ư': 'u', 'ừ': 'u', 'ứ': 'u', 'ử': 'u', 'ữ': 'u', 'ự': 'u',
+        'ỳ': 'y', 'ý': 'y', 'ỷ': 'y', 'ỹ': 'y', 'ỵ': 'y',
+        'đ': 'd',
+        # Viết hoa
+        'À': 'A', 'Á': 'A', 'Ả': 'A', 'Ã': 'A', 'Ạ': 'A',
+        'Ă': 'A', 'Ằ': 'A', 'Ắ': 'A', 'Ẳ': 'A', 'Ẵ': 'A', 'Ặ': 'A',
+        'Â': 'A', 'Ầ': 'A', 'Ấ': 'A', 'Ẩ': 'A', 'Ẫ': 'A', 'Ậ': 'A',
+        'È': 'E', 'É': 'E', 'Ẻ': 'E', 'Ẽ': 'E', 'Ẹ': 'E',
+        'Ê': 'E', 'Ề': 'E', 'Ế': 'E', 'Ể': 'E', 'Ễ': 'E', 'Ệ': 'E',
+        'Ì': 'I', 'Í': 'I', 'Ỉ': 'I', 'Ĩ': 'I', 'Ị': 'I',
+        'Ò': 'O', 'Ó': 'O', 'Ỏ': 'O', 'Õ': 'O', 'Ọ': 'O',
+        'Ô': 'O', 'Ồ': 'O', 'Ố': 'O', 'Ổ': 'O', 'Ỗ': 'O', 'Ộ': 'O',
+        'Ơ': 'O', 'Ờ': 'O', 'Ớ': 'O', 'Ở': 'O', 'Ỡ': 'O', 'Ợ': 'O',
+        'Ù': 'U', 'Ú': 'U', 'Ủ': 'U', 'Ũ': 'U', 'Ụ': 'U',
+        'Ư': 'U', 'Ừ': 'U', 'Ứ': 'U', 'Ử': 'U', 'Ữ': 'U', 'Ự': 'U',
+        'Ỳ': 'Y', 'Ý': 'Y', 'Ỷ': 'Y', 'Ỹ': 'Y', 'Ỵ': 'Y',
+        'Đ': 'D'
+    }
+    
+    # Thay thế ký tự tiếng Việt
+    result = ''
+    for char in folder_name:
+        if char in vietnamese_map:
+            result += vietnamese_map[char]
+        else:
+            result += char
+    
+    # Bước 3: Thay thế khoảng trắng và ký tự đặc biệt bằng dấu gạch ngang
+    result = re.sub(r'[\s\-]+', '-', result)  # Khoảng trắng và dấu gạch ngang
+    result = re.sub(r'[^\w\-]', '', result)   # Loại bỏ ký tự đặc biệt khác
+    
+    # Bước 4: Loại bỏ dấu gạch ngang ở đầu và cuối
+    result = result.strip('-')
+    
+    # Bước 5: Giới hạn độ dài (tùy chọn)
+    if len(result) > 50:
+        result = result[:50].rstrip('-')
+    
+    # Bước 6: Kiểm tra kết quả cuối cùng
+    if not result or result.isspace():
+        return None
+    
+    return result
 
 # Cấu hình app
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# In thông tin Supabase khi khởi động
-print(f"=== FILE UPLOAD SERVER WITH SUPABASE ===")
-print(f"Supabase URL: {SUPABASE_URL}")
-print(f"Supabase Bucket: {SUPABASE_BUCKET}")
-print("Files will be stored in Supabase Storage")
-print("=" * 50)
+# In thông tin khởi động
+print(f"=== FILE UPLOAD SERVER ===")
+if DEMO_MODE:
+    print("⚠️  CHẠY Ở CHẾ ĐỘ DEMO")
+    print("📝 Chức năng upload sẽ mô phỏng")
+else:
+    print("✅ CHẠY VỚI SUPABASE")
+    print(f"🌐 Supabase URL: {SUPABASE_URL}")
+    print(f"🗂️ Bucket: {SUPABASE_BUCKET}")
+print("=" * 30)
 
 def init_db():
     """Khởi tạo bảng submissions trong Supabase"""
+    if DEMO_MODE:
+        print("📝 Demo mode: Bỏ qua kiểm tra database")
+        return
+    
     try:
         # Tạo bảng submissions nếu chưa có
-        # Lưu ý: Bạn cần tạo bảng này trong Supabase Dashboard hoặc SQL Editor
         result = supabase.table('submissions').select('*').limit(1).execute()
-        print("Database connection successful!")
+        print("✅ Database connection successful!")
     except Exception as e:
-        print(f"Database initialization error: {str(e)}")
-        print("Vui lòng tạo bảng 'submissions' trong Supabase với schema sau:")
+        print(f"❌ Database initialization error: {str(e)}")
+        print("📋 Vui lòng tạo bảng 'submissions' trong Supabase với schema sau:")
         print("""
         CREATE TABLE submissions (
             id SERIAL PRIMARY KEY,
@@ -121,6 +282,27 @@ def get_client_ip():
 
 def upload_to_supabase(file, folder_name=None):
     """Upload file lên Supabase Storage"""
+    if DEMO_MODE:
+        # Mô phỏng upload thành công
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_id = str(uuid.uuid4())[:8]
+        original_name = secure_filename(file.filename)
+        name, ext = os.path.splitext(original_name)
+        file_name = f"{name}_{timestamp}_{unique_id}{ext}"
+        
+        if folder_name:
+            storage_path = f"{folder_name}/{file_name}"
+        else:
+            storage_path = file_name
+        
+        return {
+            'success': True,
+            'file_name': file_name,
+            'storage_path': storage_path,
+            'file_url': f"https://demo.example.com/{storage_path}",
+            'file_size': 1024  # Giả lập 1KB
+        }
+    
     try:
         # Tạo tên file unique
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -178,9 +360,12 @@ def index():
 @app.route('/info')
 def server_info():
     """API để lấy thông tin server"""
+    storage_info = "Demo Mode (No Supabase)" if DEMO_MODE else "Supabase Storage"
+    
     return jsonify({
-        'storage_type': 'Supabase Storage',
-        'supabase_url': SUPABASE_URL,
+        'storage_type': storage_info,
+        'demo_mode': DEMO_MODE,
+        'supabase_url': SUPABASE_URL if not DEMO_MODE else "Not configured",
         'supabase_bucket': SUPABASE_BUCKET,
         'server_platform': platform.system(),
         'allowed_extensions': list(ALLOWED_EXTENSIONS),
@@ -231,7 +416,7 @@ def upload_file():
             file = request.files['file']
             if file and hasattr(file, 'filename') and file.filename and file.filename.strip():
                 if allowed_file(file.filename):
-                    # Upload lên Supabase
+                    # Upload lên Supabase (hoặc mô phỏng)
                     upload_result = upload_to_supabase(file, final_folder_name)
                     
                     if upload_result['success']:
@@ -240,15 +425,16 @@ def upload_file():
                         file_size = upload_result['file_size']
                         storage_path = upload_result['storage_path']
                         
-                        print(f"File uploaded to Supabase: {storage_path} ({format_file_size(file_size)}) from IP: {client_ip}")
+                        status_text = "Demo upload" if DEMO_MODE else "Uploaded to Supabase"
+                        print(f"{status_text}: {storage_path} ({format_file_size(file_size)}) from IP: {client_ip}")
                     else:
                         return jsonify({'error': f'Lỗi upload: {upload_result["error"]}'}), 500
                 else:
                     return jsonify({'error': 'Loại file không được hỗ trợ'}), 400
 
-        # Lưu vào Supabase Database
+        # Lưu vào database (hoặc mô phỏng)
         try:
-            result = supabase.table('submissions').insert({
+            submission_data = {
                 'ho_ten': ho_ten,
                 'ten_de_tai': ten_de_tai,
                 'noi_cong_tac': noi_cong_tac,
@@ -263,20 +449,27 @@ def upload_file():
                 'upload_time': datetime.datetime.now().isoformat(),
                 'upload_ip': client_ip,
                 'storage_path': storage_path
-            }).execute()
+            }
             
-            print(f"Data saved to Supabase database: {result}")
+            if not DEMO_MODE:
+                result = supabase.table('submissions').insert(submission_data).execute()
+                print(f"Data saved to Supabase database: {result}")
+            else:
+                print(f"Demo mode - would save: {submission_data}")
             
         except Exception as e:
             print(f"Database error: {str(e)}")
-            # Nếu lưu DB lỗi nhưng file đã upload, có thể cần xóa file
-            return jsonify({'error': f'Lỗi lưu database: {str(e)}'}), 500
+            if not DEMO_MODE:
+                return jsonify({'error': f'Lỗi lưu database: {str(e)}'}), 500
 
         # Tạo message phản hồi
-        if final_folder_name:
-            message = f'Đã upload thành công vào thư mục "{final_folder_name}" trên Supabase'
+        if DEMO_MODE:
+            message = "Demo upload thành công! (Không có Supabase thật)"
         else:
-            message = 'Upload thành công lên Supabase Storage!'
+            if final_folder_name:
+                message = f'Đã upload thành công vào thư mục "{final_folder_name}" trên Supabase'
+            else:
+                message = 'Upload thành công lên Supabase Storage!'
         
         if file_url:
             message += f' - URL: {file_url}'
@@ -289,7 +482,8 @@ def upload_file():
             'file_size_human': format_file_size(file_size),
             'folder': final_folder_name,
             'storage_path': storage_path,
-            'client_ip': client_ip
+            'client_ip': client_ip,
+            'demo_mode': DEMO_MODE
         })
 
     except Exception as e:
@@ -299,6 +493,22 @@ def upload_file():
 @app.route('/submissions')
 def list_submissions():
     """API để lấy danh sách submissions"""
+    if DEMO_MODE:
+        return jsonify({
+            'submissions': [
+                {
+                    'id': 1,
+                    'ho_ten': 'Demo User',
+                    'ten_de_tai': 'Demo Project',
+                    'upload_time': datetime.datetime.now().isoformat(),
+                    'file_name': 'demo_file.pdf',
+                    'file_size': 1024
+                }
+            ],
+            'count': 1,
+            'demo_mode': True
+        })
+    
     try:
         result = supabase.table('submissions').select('*').order('upload_time', desc=True).execute()
         return jsonify({
@@ -311,6 +521,16 @@ def list_submissions():
 @app.route('/download/<int:submission_id>')
 def download_file(submission_id):
     """Download file từ Supabase Storage"""
+    if DEMO_MODE:
+        # Tạo file demo để download
+        demo_content = f"Demo file content for submission {submission_id}\nGenerated at: {datetime.datetime.now()}"
+        return send_file(
+            io.BytesIO(demo_content.encode()),
+            as_attachment=True,
+            download_name=f"demo_file_{submission_id}.txt",
+            mimetype='text/plain'
+        )
+    
     try:
         # Lấy thông tin file từ database
         result = supabase.table('submissions').select('*').eq('id', submission_id).single().execute()
@@ -341,386 +561,440 @@ def download_file(submission_id):
             
     except Exception as e:
         return jsonify({'error': f'Lỗi download: {str(e)}'}), 500
-    
-# API để tạo và quản lý thư mục thực tế trong Supabase Storage
 
-@app.route('/api/folders/create', methods=['POST'])
-def create_folder_in_storage():
-    """Tạo thư mục thực tế trong Supabase Storage"""
+# Các API khác có thể được thêm tương tự với kiểm tra DEMO_MODE
+
+# Thêm các API này vào file Flask server của bạn
+
+@app.route('/api/folders', methods=['GET'])
+def get_all_folders():
+    """API để lấy danh sách tất cả folders từ cả Database và Storage"""
     try:
-        data = request.get_json()
+        folders_data = {
+            'database_folders': [],
+            'storage_folders': [],
+            'combined_folders': []
+        }
         
-        if not data or 'folder_name' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'Vui lòng cung cấp tên thư mục'
-            }), 400
-        
-        folder_name = data['folder_name'].strip()
-        
-        if not folder_name:
-            return jsonify({
-                'success': False,
-                'error': 'Tên thư mục không được để trống'
-            }), 400
-        
-        # Làm sạch tên thư mục
-        safe_folder_name = secure_folder_name(folder_name)
-        
-        if not safe_folder_name:
-            return jsonify({
-                'success': False,
-                'error': 'Tên thư mục không hợp lệ'
-            }), 400
-        
-        # Kiểm tra thư mục đã tồn tại chưa trong Storage
+        # 1. Lấy folders từ Database (từ submissions)
         try:
-            existing_files = supabase.storage.from_(SUPABASE_BUCKET).list()
+            db_result = supabase.table('submissions').select('folder_name').execute()
             
-            # Kiểm tra xem có file nào trong thư mục này không
-            folder_exists = False
-            if existing_files:
-                for file_item in existing_files:
-                    if file_item['name'].startswith(safe_folder_name + '/'):
-                        folder_exists = True
-                        break
+            # Đếm số lượng submissions theo folder
+            folder_counts = {}
+            for item in db_result.data:
+                folder_name = item.get('folder_name')
+                if folder_name:
+                    folder_counts[folder_name] = folder_counts.get(folder_name, 0) + 1
             
-            if folder_exists:
-                return jsonify({
-                    'success': False,
-                    'error': f'Thư mục "{safe_folder_name}" đã tồn tại trong Storage'
-                }), 400
-                
-        except Exception as storage_error:
-            print(f"Error checking existing folders: {str(storage_error)}")
-        
-        # Tạo file README.md để khởi tạo thư mục
-        readme_content = f"""# Thư mục: {safe_folder_name}
-
-Thư mục được tạo vào: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
-
-## Thông tin
-- Tên thư mục: {safe_folder_name}
-- Tên gốc: {folder_name}
-- Bucket: {SUPABASE_BUCKET}
-
-## Hướng dẫn
-Upload các file vào thư mục này thông qua form upload.
-"""
-        
-        readme_path = f"{safe_folder_name}/README.md"
-        
-        # Upload file README
-        result = supabase.storage.from_(SUPABASE_BUCKET).upload(
-            path=readme_path,
-            file=readme_content.encode('utf-8'),
-            file_options={
-                "content-type": "text/markdown; charset=utf-8"
-            }
-        )
-        
-        if result.status_code != 200:
-            return jsonify({
-                'success': False,
-                'error': f'Không thể tạo thư mục: {result.status_code}'
-            }), 500
-        
-        # Lấy URL public của file README
-        readme_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(readme_path)
-        
-        # Lưu thông tin vào database
-        try:
-            client_ip = get_client_ip()
-            supabase.table('submissions').insert({
-                'ho_ten': 'System',
-                'ten_de_tai': f'Tạo thư mục: {safe_folder_name}',
-                'noi_cong_tac': 'System',
-                'khoa_phong': 'Administration',
-                'gio_quy_doi': 0,
-                'minh_chung': 'Folder Creation',
-                'ghi_chu': f'Thư mục "{safe_folder_name}" được tạo tự động với README.md',
-                'file_name': 'README.md',
-                'file_url': readme_url,
-                'file_size': len(readme_content.encode('utf-8')),
-                'folder_name': safe_folder_name,
-                'upload_time': datetime.datetime.now().isoformat(),
-                'upload_ip': client_ip,
-                'storage_path': readme_path
-            }).execute()
-        except Exception as db_error:
-            print(f"Database logging error: {str(db_error)}")
-        
-        return jsonify({
-            'success': True,
-            'message': f'Thư mục "{safe_folder_name}" đã được tạo thành công',
-            'folder_name': safe_folder_name,
-            'readme_url': readme_url,
-            'readme_path': readme_path
-        })
-        
-    except Exception as e:
-        print(f"Error creating folder: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': f'Lỗi tạo thư mục: {str(e)}'
-        }), 500
-
-@app.route('/api/folders/storage', methods=['GET'])
-def get_folders_from_storage():
-    """Lấy danh sách thư mục thực tế từ Supabase Storage"""
-    try:
-        # Lấy tất cả files từ Storage
-        result = supabase.storage.from_(SUPABASE_BUCKET).list()
-        
-        if not result:
-            return jsonify({
-                'success': True,
-                'folders': [],
-                'count': 0,
-                'message': 'Storage trống hoặc chưa có thư mục nào'
-            })
-        
-        # Phân tích để tìm thư mục
-        folders = {}
-        
-        for file_item in result:
-            file_name = file_item['name']
-            
-            # Nếu có dấu '/' thì đây là file trong thư mục
-            if '/' in file_name:
-                folder_name = file_name.split('/')[0]
-                
-                if folder_name not in folders:
-                    folders[folder_name] = {
-                        'name': folder_name,
-                        'file_count': 0,
-                        'total_size': 0,
-                        'files': [],
-                        'created_at': None,
-                        'updated_at': None
-                    }
-                
-                # Thêm thông tin file
-                file_size = file_item.get('metadata', {}).get('size', 0) or 0
-                folders[folder_name]['file_count'] += 1
-                folders[folder_name]['total_size'] += file_size
-                folders[folder_name]['files'].append({
-                    'name': file_name.split('/')[-1],  # Chỉ tên file
-                    'full_path': file_name,
-                    'size': file_size,
-                    'size_human': format_file_size(file_size),
-                    'created_at': file_item.get('created_at'),
-                    'updated_at': file_item.get('updated_at')
+            # Format database folders
+            for folder_name, count in folder_counts.items():
+                folders_data['database_folders'].append({
+                    'name': folder_name,
+                    'source': 'database',
+                    'submission_count': count
                 })
-                
-                # Cập nhật thời gian
-                if not folders[folder_name]['created_at'] or file_item.get('created_at', '') < folders[folder_name]['created_at']:
-                    folders[folder_name]['created_at'] = file_item.get('created_at')
-                
-                if not folders[folder_name]['updated_at'] or file_item.get('updated_at', '') > folders[folder_name]['updated_at']:
-                    folders[folder_name]['updated_at'] = file_item.get('updated_at')
+        except Exception as db_error:
+            print(f"Error getting folders from database: {str(db_error)}")
         
-        # Chuyển thành list và format
-        folder_list = []
-        for folder_name, folder_info in folders.items():
-            folder_data = {
-                'name': folder_name,
-                'file_count': folder_info['file_count'],
-                'total_size': folder_info['total_size'],
-                'total_size_human': format_file_size(folder_info['total_size']),
-                'created_at': folder_info['created_at'],
-                'updated_at': folder_info['updated_at'],
-                'files': folder_info['files']
-            }
-            folder_list.append(folder_data)
-        
-        # Sắp xếp theo tên
-        folder_list.sort(key=lambda x: x['name'])
-        
-        return jsonify({
-            'success': True,
-            'folders': folder_list,
-            'count': len(folder_list),
-            'message': f'Tìm thấy {len(folder_list)} thư mục trong Storage'
-        })
-        
-    except Exception as e:
-        print(f"Error getting folders from storage: {str(e)}")
-        return jsonify({
-            'success': False,
-            'folders': [],
-            'error': f'Lỗi đọc Storage: {str(e)}'
-        }), 500
-
-@app.route('/api/folders/storage/<path:folder_name>/files', methods=['GET'])
-def get_files_in_storage_folder(folder_name):
-    """Lấy danh sách files trong thư mục cụ thể từ Storage"""
-    try:
-        folder_name = unquote(folder_name)
-        
-        # Lấy files trong thư mục từ Storage
-        result = supabase.storage.from_(SUPABASE_BUCKET).list(folder_name)
-        
-        if not result:
-            return jsonify({
-                'success': True,
-                'files': [],
-                'count': 0,
-                'folder': folder_name,
-                'message': f'Thư mục "{folder_name}" trống'
-            })
-        
-        # Format thông tin files
-        files = []
-        total_size = 0
-        
-        for file_item in result:
-            file_size = file_item.get('metadata', {}).get('size', 0) or 0
-            total_size += file_size
+        # 2. Lấy folders từ Storage
+        try:
+            storage_result = supabase.storage.from_(SUPABASE_BUCKET).list()
             
-            file_info = {
-                'name': file_item['name'],
-                'full_path': f"{folder_name}/{file_item['name']}",
-                'size': file_size,
-                'size_human': format_file_size(file_size),
-                'content_type': file_item.get('metadata', {}).get('mimetype'),
-                'created_at': file_item.get('created_at'),
-                'updated_at': file_item.get('updated_at'),
-                'public_url': supabase.storage.from_(SUPABASE_BUCKET).get_public_url(f"{folder_name}/{file_item['name']}")
-            }
-            files.append(file_info)
+            if storage_result:
+                storage_folders = {}
+                
+                for file_item in storage_result:
+                    file_name = file_item['name']
+                    
+                    if '/' in file_name:
+                        folder_name = file_name.split('/')[0]
+                        
+                        if folder_name not in storage_folders:
+                            storage_folders[folder_name] = {
+                                'name': folder_name,
+                                'source': 'storage',
+                                'file_count': 0,
+                                'total_size': 0,
+                                'last_modified': None
+                            }
+                        
+                        file_size = file_item.get('metadata', {}).get('size', 0) or 0
+                        storage_folders[folder_name]['file_count'] += 1
+                        storage_folders[folder_name]['total_size'] += file_size
+                        
+                        # Cập nhật thời gian sửa đổi cuối
+                        file_updated = file_item.get('updated_at')
+                        if file_updated and (not storage_folders[folder_name]['last_modified'] or 
+                                           file_updated > storage_folders[folder_name]['last_modified']):
+                            storage_folders[folder_name]['last_modified'] = file_updated
+                
+                folders_data['storage_folders'] = list(storage_folders.values())
+        except Exception as storage_error:
+            print(f"Error getting folders from storage: {str(storage_error)}")
         
-        # Sắp xếp theo tên
-        files.sort(key=lambda x: x['name'])
+        # 3. Kết hợp và loại bỏ trùng lặp
+        all_folder_names = set()
+        
+        # Thêm từ database
+        for folder in folders_data['database_folders']:
+            all_folder_names.add(folder['name'])
+        
+        # Thêm từ storage
+        for folder in folders_data['storage_folders']:
+            all_folder_names.add(folder['name'])
+        
+        # Tạo danh sách kết hợp
+        for folder_name in sorted(all_folder_names):
+            # Tìm thông tin từ database
+            db_info = next((f for f in folders_data['database_folders'] if f['name'] == folder_name), None)
+            
+            # Tìm thông tin từ storage
+            storage_info = next((f for f in folders_data['storage_folders'] if f['name'] == folder_name), None)
+            
+            combined_folder = {
+                'name': folder_name,
+                'exists_in_database': db_info is not None,
+                'exists_in_storage': storage_info is not None,
+                'submission_count': db_info['submission_count'] if db_info else 0,
+                'file_count': storage_info['file_count'] if storage_info else 0,
+                'total_size': storage_info['total_size'] if storage_info else 0,
+                'total_size_human': format_file_size(storage_info['total_size']) if storage_info else '0 B',
+                'last_modified': storage_info['last_modified'] if storage_info else None,
+                'status': 'active' if (db_info and storage_info) else 'partial'
+            }
+            
+            folders_data['combined_folders'].append(combined_folder)
         
         return jsonify({
             'success': True,
-            'files': files,
-            'count': len(files),
-            'folder': folder_name,
-            'total_size': total_size,
-            'total_size_human': format_file_size(total_size),
-            'message': f'Tìm thấy {len(files)} file trong thư mục "{folder_name}"'
+            'data': folders_data,
+            'summary': {
+                'total_folders': len(folders_data['combined_folders']),
+                'database_only': len([f for f in folders_data['combined_folders'] if f['exists_in_database'] and not f['exists_in_storage']]),
+                'storage_only': len([f for f in folders_data['combined_folders'] if f['exists_in_storage'] and not f['exists_in_database']]),
+                'both_sources': len([f for f in folders_data['combined_folders'] if f['exists_in_database'] and f['exists_in_storage']])
+            },
+            'message': f'Tìm thấy {len(folders_data["combined_folders"])} folder'
         })
         
     except Exception as e:
-        print(f"Error getting files in folder {folder_name}: {str(e)}")
+        print(f"Error in get_all_folders: {str(e)}")
         return jsonify({
             'success': False,
-            'files': [],
-            'error': f'Lỗi đọc thư mục: {str(e)}'
+            'error': f'Lỗi lấy danh sách folder: {str(e)}'
         }), 500
 
-@app.route('/api/folders/init-default', methods=['POST'])
-def init_default_folders():
-    """Tạo các thư mục mặc định"""
+@app.route('/api/folders/simple', methods=['GET'])
+def get_folders_simple():
+    """API đơn giản để lấy danh sách tên folder (cho dropdown)"""
     try:
-        default_folders = [
-            'Đề tài nghiên cứu',
+        # Lấy từ database
+        result = supabase.table('submissions').select('folder_name').execute()
+        
+        folder_names = set()
+        for item in result.data:
+            folder_name = item.get('folder_name')
+            if folder_name and folder_name.strip():
+                folder_names.add(folder_name.strip())
+        
+        # Sắp xếp theo alphabet
+        sorted_folders = sorted(list(folder_names))
+        
+        return jsonify({
+            'success': True,
+            'folders': sorted_folders,
+            'count': len(sorted_folders)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi lấy danh sách folder: {str(e)}'
+        }), 500
+
+@app.route('/api/folders/stats', methods=['GET'])
+def get_folder_stats():
+    """API để lấy thống kê chi tiết về folders"""
+    try:
+        # Lấy tất cả submissions
+        result = supabase.table('submissions').select('*').execute()
+        
+        folder_stats = {}
+        total_submissions = len(result.data)
+        
+        for submission in result.data:
+            folder_name = submission.get('folder_name', 'Không có thư mục')
+            
+            if folder_name not in folder_stats:
+                folder_stats[folder_name] = {
+                    'name': folder_name,
+                    'submission_count': 0,
+                    'total_file_size': 0,
+                    'file_count': 0,
+                    'last_upload': None,
+                    'contributors': set(),
+                    'file_types': {}
+                }
+            
+            stats = folder_stats[folder_name]
+            stats['submission_count'] += 1
+            
+            # File size
+            file_size = submission.get('file_size', 0) or 0
+            if isinstance(file_size, str):
+                file_size = int(file_size) if file_size.isdigit() else 0
+            stats['total_file_size'] += file_size
+            
+            # File count
+            if submission.get('file_name'):
+                stats['file_count'] += 1
+                
+                # File type
+                file_name = submission.get('file_name', '')
+                if '.' in file_name:
+                    file_ext = file_name.split('.')[-1].lower()
+                    stats['file_types'][file_ext] = stats['file_types'].get(file_ext, 0) + 1
+            
+            # Contributor
+            ho_ten = submission.get('ho_ten')
+            if ho_ten:
+                stats['contributors'].add(ho_ten)
+            
+            # Last upload
+            upload_time = submission.get('upload_time')
+            if upload_time and (not stats['last_upload'] or upload_time > stats['last_upload']):
+                stats['last_upload'] = upload_time
+        
+        # Convert sets to lists và format
+        formatted_stats = []
+        for folder_name, stats in folder_stats.items():
+            formatted_stat = {
+                'name': folder_name,
+                'submission_count': stats['submission_count'],
+                'file_count': stats['file_count'],
+                'total_file_size': stats['total_file_size'],
+                'total_file_size_human': format_file_size(stats['total_file_size']),
+                'contributor_count': len(stats['contributors']),
+                'contributors': list(stats['contributors']),
+                'file_types': stats['file_types'],
+                'last_upload': stats['last_upload'],
+                'percentage': round((stats['submission_count'] / total_submissions) * 100, 2) if total_submissions > 0 else 0
+            }
+            formatted_stats.append(formatted_stat)
+        
+        # Sắp xếp theo số lượng submission
+        formatted_stats.sort(key=lambda x: x['submission_count'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'folder_stats': formatted_stats,
+            'summary': {
+                'total_folders': len(formatted_stats),
+                'total_submissions': total_submissions,
+                'folders_with_files': len([f for f in formatted_stats if f['file_count'] > 0]),
+                'empty_folders': len([f for f in formatted_stats if f['file_count'] == 0])
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi lấy thống kê folder: {str(e)}'
+        }), 500
+
+@app.route('/api/folders/create-defaults', methods=['POST'])
+def create_default_folders_api():
+    """API để tạo các thư mục mặc định - Chỉ tạo thư mục trống"""
+    try:
+        # Lấy danh sách thư mục từ request hoặc sử dụng mặc định
+        data = request.get_json() or {}
+        
+        # Thư mục mặc định tiếng Việt
+        default_folders = data.get('folders', [
+            'Đề tài nghiên cứu khoa học',
             'Báo cáo thực tập',
-            'Luận văn tốt nghiệp',
+            'Luận văn - Luận án',
             'Tài liệu tham khảo',
-            'Hình ảnh minh họa'
-        ]
+            'Hình ảnh - Media',
+            'Báo cáo dự án',
+            'Tài liệu hướng dẫn',
+            'Mẫu biểu - Form',
+            'Chứng chỉ - Bằng cấp',
+            'Tài liệu hành chính'
+        ])
         
         created_folders = []
+        existing_folders = []
         errors = []
         
+        # Kiểm tra folders đã tồn tại
+        try:
+            existing_files = supabase.storage.from_(SUPABASE_BUCKET).list()
+            existing_folder_names = set()
+            
+            if existing_files:
+                for file_item in existing_files:
+                    if '/' in file_item['name']:
+                        folder_name = file_item['name'].split('/')[0]
+                        existing_folder_names.add(folder_name)
+        except Exception as check_error:
+            print(f"Error checking existing folders: {str(check_error)}")
+            existing_folder_names = set()
+        
+        # Tạo từng thư mục
         for folder_name in default_folders:
             try:
-                # Tạo README cho mỗi thư mục
-                readme_content = f"""# {folder_name}
-
-Thư mục dành cho: {folder_name}
-Được tạo tự động vào: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
-
-## Hướng dẫn sử dụng
-1. Upload file thông qua form
-2. Chọn thư mục "{folder_name}"
-3. Điền đầy đủ thông tin
-
-## Loại file phù hợp
-- PDF, DOC, DOCX: Tài liệu chính
-- JPG, PNG: Hình ảnh minh họa
-- ZIP, RAR: File nén chứa nhiều tài liệu
-"""
+                safe_folder_name = secure_folder_name(folder_name)
                 
-                readme_path = f"{folder_name}/README.md"
+                if not safe_folder_name:
+                    errors.append(f"{folder_name}: Tên không hợp lệ")
+                    continue
                 
-                # Upload README
-                result = supabase.storage.from_(SUPABASE_BUCKET).upload(
-                    path=readme_path,
-                    file=readme_content.encode('utf-8'),
-                    file_options={
-                        "content-type": "text/markdown; charset=utf-8"
-                    }
-                )
+                if safe_folder_name in existing_folder_names:
+                    existing_folders.append(safe_folder_name)
+                    continue
                 
-                if result.status_code == 200:
-                    created_folders.append(folder_name)
+                # Tạo file trống để tạo thư mục (vì storage cần ít nhất 1 file)
+                placeholder_path = f"{safe_folder_name}/.gitkeep"
+                
+                try:
+                    # Upload file trống để tạo thư mục
+                    upload_result = supabase.storage.from_(SUPABASE_BUCKET).upload(
+                        placeholder_path,
+                        b'',  # File trống
+                        {
+                            'content-type': 'text/plain',
+                            'upsert': 'false'
+                        }
+                    )
                     
-                    # Lưu vào database
-                    try:
-                        supabase.table('submissions').insert({
-                            'ho_ten': 'System',
-                            'ten_de_tai': f'Khởi tạo thư mục: {folder_name}',
-                            'noi_cong_tac': 'System',
-                            'khoa_phong': 'Administration',
-                            'gio_quy_doi': 0,
-                            'minh_chung': 'Default Folder Creation',
-                            'ghi_chu': f'Thư mục mặc định "{folder_name}" được tạo tự động',
-                            'file_name': 'README.md',
-                            'file_url': supabase.storage.from_(SUPABASE_BUCKET).get_public_url(readme_path),
-                            'file_size': len(readme_content.encode('utf-8')),
-                            'folder_name': folder_name,
-                            'upload_time': datetime.datetime.now().isoformat(),
-                            'upload_ip': get_client_ip(),
-                            'storage_path': readme_path
-                        }).execute()
-                    except Exception as db_error:
-                        print(f"DB error for {folder_name}: {str(db_error)}")
+                    if upload_result:
+                        created_folders.append(safe_folder_name)
+                    else:
+                        errors.append(f"{safe_folder_name}: Không thể tạo thư mục")
                         
-                else:
-                    errors.append(f"{folder_name}: {result.status_code}")
-                    
+                except Exception as upload_error:
+                    error_msg = str(upload_error)
+                    if "already exists" in error_msg.lower():
+                        existing_folders.append(safe_folder_name)
+                    else:
+                        errors.append(f"{safe_folder_name}: {error_msg}")
+                        
             except Exception as folder_error:
                 errors.append(f"{folder_name}: {str(folder_error)}")
         
+        # Tạo response
+        response_data = {
+            'success': True,
+            'message': f'Hoàn thành khởi tạo thư mục mặc định',
+            'results': {
+                'created': {
+                    'folders': created_folders,
+                    'count': len(created_folders)
+                },
+                'existing': {
+                    'folders': existing_folders,
+                    'count': len(existing_folders)
+                },
+                'errors': {
+                    'details': errors,
+                    'count': len(errors)
+                }
+            },
+            'summary': {
+                'total_requested': len(default_folders),
+                'successfully_created': len(created_folders),
+                'already_existed': len(existing_folders),
+                'failed': len(errors)
+            }
+        }
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        print(f"Error in create_default_folders_api: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi tạo thư mục mặc định: {str(e)}'
+        }), 500
+
+@app.route('/api/folders/cleanup', methods=['POST'])
+def cleanup_empty_folders():
+    """API để dọn dẹp các thư mục trống (chỉ có README)"""
+    try:
+        data = request.get_json() or {}
+        confirm = data.get('confirm', False)
+        
+        if not confirm:
+            return jsonify({
+                'success': False,
+                'error': 'Vui lòng xác nhận việc dọn dẹp bằng cách gửi {"confirm": true}'
+            }), 400
+        
+        # Lấy tất cả files từ storage
+        files = supabase.storage.from_(SUPABASE_BUCKET).list()
+        
+        if not files:
+            return jsonify({
+                'success': True,
+                'message': 'Storage trống, không có gì để dọn dẹp',
+                'cleaned_folders': []
+            })
+        
+        # Nhóm files theo thư mục
+        folders = {}
+        for file_item in files:
+            if '/' in file_item['name']:
+                folder_name = file_item['name'].split('/')[0]
+                if folder_name not in folders:
+                    folders[folder_name] = []
+                folders[folder_name].append(file_item['name'])
+        
+        # Tìm thư mục chỉ có README
+        empty_folders = []
+        for folder_name, file_list in folders.items():
+            if len(file_list) == 1 and file_list[0].endswith('/README.md'):
+                empty_folders.append(folder_name)
+        
+        # Xóa các thư mục trống
+        cleaned_folders = []
+        errors = []
+        
+        for folder_name in empty_folders:
+            try:
+                # Xóa README file
+                readme_path = f"{folder_name}/README.md"
+                delete_result = supabase.storage.from_(SUPABASE_BUCKET).remove([readme_path])
+                
+                if delete_result:
+                    cleaned_folders.append(folder_name)
+                    
+                    # Xóa record trong database nếu có
+                    try:
+                        supabase.table('submissions').delete().eq('storage_path', readme_path).execute()
+                    except Exception as db_error:
+                        print(f"Error removing DB record for {folder_name}: {str(db_error)}")
+                        
+                else:
+                    errors.append(f"{folder_name}: Không thể xóa")
+                    
+            except Exception as delete_error:
+                errors.append(f"{folder_name}: {str(delete_error)}")
+        
         return jsonify({
             'success': True,
-            'message': f'Đã tạo {len(created_folders)} thư mục mặc định',
-            'created_folders': created_folders,
+            'message': f'Đã dọn dẹp {len(cleaned_folders)} thư mục trống',
+            'cleaned_folders': cleaned_folders,
             'errors': errors,
-            'created_count': len(created_folders),
-            'error_count': len(errors)
+            'total_cleaned': len(cleaned_folders),
+            'total_errors': len(errors)
         })
         
     except Exception as e:
         return jsonify({
             'success': False,
-            'error': f'Lỗi khởi tạo thư mục: {str(e)}'
+            'error': f'Lỗi dọn dẹp thư mục: {str(e)}'
         }), 500
-
-
-def create_default_folders_on_startup():
-    """Tạo thư mục mặc định khi khởi động server"""
-    try:
-        # Chờ một chút để server sẵn sàng
-        import time
-        import threading
-        import requests
-        
-        def delayed_init():
-            time.sleep(2)  # Chờ server khởi động
-            try:
-                response = requests.post('http://localhost:5000/api/folders/init-default')
-                print(f"✅ Khởi tạo thư mục mặc định: {response.json()}")
-            except Exception as e:
-                print(f"❌ Lỗi khởi tạo thư mục: {e}")
-        
-        # Chạy trong thread riêng
-        threading.Thread(target=delayed_init, daemon=True).start()
-    except Exception as e:
-        print(f"Lỗi setup auto-init: {e}")
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
