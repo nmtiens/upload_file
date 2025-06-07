@@ -509,277 +509,291 @@
       </div>
     </div>
 
-    // Supabase JS SDK - thêm vào phần <head>
-      // <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-      
-      <script>
-        // Cấu hình Supabase - THAY ĐỔI CÁC THÔNG TIN NÀY
-        const SUPABASE_URL = "https://mbigeepdbascromjmanh.supabase.co";
-        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1iaWdlZXBkYmFzY3JvbWptYW5oIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0OTIyMTUyMCwiZXhwIjoyMDY0Nzk3NTIwfQ.OAMDTWa2EZQUiPKlcFTvQXcBubQnkKst5kRnOiK8Tf0";
-        const SUPABASE_BUCKET = "file-uploads";
-      
-        // Khởi tạo Supabase client
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      
-        // Hàm lấy folders từ database
-        async function getFoldersFromDatabase() {
-          try {
-            const { data, error } = await supabase
-              .from("submissions")
-              .select("folder_name")
-              .not("folder_name", "is", null)
-              .not("folder_name", "eq", "");
-      
-            if (error) {
-              throw error;
-            }
-      
-            // Đếm số lượng submissions theo folder
-            const folderCounts = {};
-            data.forEach((item) => {
-              const folderName = item.folder_name?.trim();
-              if (folderName) {
-                folderCounts[folderName] = (folderCounts[folderName] || 0) + 1;
-              }
-            });
-      
-            return Object.entries(folderCounts).map(([name, count]) => ({
-              name,
-              submission_count: count,
-            }));
-          } catch (error) {
-            console.error("Database query error:", error);
-            return [];
+    <script>
+      // Cấu hình Supabase - THAY ĐỔI CÁC THÔNG TIN NÀY
+      const SUPABASE_URL = "https://mbigeepdbascromjmanh.supabase.co";
+      const SUPABASE_ANON_KEY =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1iaWdlZXBkYmFzY3JvbWptYW5oIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0OTIyMTUyMCwiZXhwIjoyMDY0Nzk3NTIwfQ.OAMDTWa2EZQUiPKlcFTvQXcBubQnkKst5kRnOiK8Tf0";
+      const SUPABASE_BUCKET = "file-uploads";
+
+      // Khởi tạo Supabase client
+      const supabase = window.supabase.createClient(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY
+      );
+
+      // Hàm lấy folders từ database
+      async function getFoldersFromDatabase() {
+        try {
+          const { data, error } = await supabase
+            .from("submissions")
+            .select("folder_name")
+            .not("folder_name", "is", null)
+            .not("folder_name", "eq", "");
+
+          if (error) {
+            throw error;
           }
-        }
-      
-        // Hàm lấy folders từ storage
-        async function getFoldersFromStorage() {
-          try {
-            const { data, error } = await supabase.storage
-              .from(SUPABASE_BUCKET)
-              .list("", { limit: 1000 });
-      
-            if (error) {
-              throw error;
+
+          // Đếm số lượng submissions theo folder
+          const folderCounts = {};
+          data.forEach((item) => {
+            const folderName = item.folder_name?.trim();
+            if (folderName) {
+              folderCounts[folderName] = (folderCounts[folderName] || 0) + 1;
             }
-      
-            const storageFolders = {};
-      
-            data.forEach((item) => {
-              const fileName = item.name;
-              let folderName = null;
-      
-              // Kiểm tra nếu là file trong subfolder
-              if (fileName.includes("/")) {
-                folderName = fileName.split("/")[0];
-              } else if (!fileName.includes(".")) {
-                // Không có extension, có thể là folder
-                folderName = fileName;
-              }
-      
-              if (folderName && folderName.trim()) {
-                const trimmedName = folderName.trim();
-                if (!storageFolders[trimmedName]) {
-                  storageFolders[trimmedName] = {
-                    name: trimmedName,
-                    file_count: 0,
-                  };
-                }
-                storageFolders[trimmedName].file_count += 1;
-              }
-            });
-      
-            return Object.values(storageFolders);
-          } catch (error) {
-            console.error("Storage query error:", error);
-            return [];
-          }
+          });
+
+          return Object.entries(folderCounts).map(([name, count]) => ({
+            name,
+            submission_count: count,
+          }));
+        } catch (error) {
+          console.error("Database query error:", error);
+          return [];
         }
-      
-        // Hàm load folders và cập nhật dropdown
-        async function loadFolders() {
-          const folderSelect = document.getElementById("folder_select");
-          const folderInfo = document.getElementById("folderInfo");
-          
-          try {
-            // Hiển thị loading state
-            folderSelect.innerHTML = '<option value="">⏳ Đang tải...</option>';
-            folderSelect.disabled = true;
-      
-            // Lấy dữ liệu từ cả hai nguồn
-            const [databaseFolders, storageFolders] = await Promise.all([
-              getFoldersFromDatabase(),
-              getFoldersFromStorage(),
-            ]);
-      
-            // Kết hợp và sắp xếp danh sách folders
-            const allFolderNames = new Set();
-            databaseFolders.forEach((folder) => allFolderNames.add(folder.name));
-            storageFolders.forEach((folder) => allFolderNames.add(folder.name));
-      
-            const sortedFolders = Array.from(allFolderNames).sort();
-      
-            // Cập nhật dropdown
-            folderSelect.innerHTML = '<option value="">📁 Chọn thư mục...</option>';
-            
-            sortedFolders.forEach((folderName) => {
-              const dbInfo = databaseFolders.find((f) => f.name === folderName);
-              const storageInfo = storageFolders.find((f) => f.name === folderName);
-              
-              const submissionCount = dbInfo ? dbInfo.submission_count : 0;
-              const fileCount = storageInfo ? storageInfo.file_count : 0;
-              
-              const option = document.createElement("option");
-              option.value = folderName;
-              option.textContent = `📁 ${folderName} (${submissionCount} records, ${fileCount} files)`;
-              folderSelect.appendChild(option);
-            });
-      
-            // Hiển thị thông tin
-            folderInfo.innerHTML = `
+      }
+
+      // Hàm lấy folders từ storage
+      async function getFoldersFromStorage() {
+        try {
+          const { data, error } = await supabase.storage
+            .from(SUPABASE_BUCKET)
+            .list("", { limit: 1000 });
+
+          if (error) {
+            throw error;
+          }
+
+          const storageFolders = {};
+
+          data.forEach((item) => {
+            const fileName = item.name;
+            let folderName = null;
+
+            // Kiểm tra nếu là file trong subfolder
+            if (fileName.includes("/")) {
+              folderName = fileName.split("/")[0];
+            } else if (!fileName.includes(".")) {
+              // Không có extension, có thể là folder
+              folderName = fileName;
+            }
+
+            if (folderName && folderName.trim()) {
+              const trimmedName = folderName.trim();
+              if (!storageFolders[trimmedName]) {
+                storageFolders[trimmedName] = {
+                  name: trimmedName,
+                  file_count: 0,
+                };
+              }
+              storageFolders[trimmedName].file_count += 1;
+            }
+          });
+
+          return Object.values(storageFolders);
+        } catch (error) {
+          console.error("Storage query error:", error);
+          return [];
+        }
+      }
+
+      // Hàm load folders và cập nhật dropdown
+      async function loadFolders() {
+        const folderSelect = document.getElementById("folder_select");
+        const folderInfo = document.getElementById("folderInfo");
+
+        try {
+          // Hiển thị loading state
+          folderSelect.innerHTML = '<option value="">⏳ Đang tải...</option>';
+          folderSelect.disabled = true;
+
+          // Lấy dữ liệu từ cả hai nguồn
+          const [databaseFolders, storageFolders] = await Promise.all([
+            getFoldersFromDatabase(),
+            getFoldersFromStorage(),
+          ]);
+
+          // Kết hợp và sắp xếp danh sách folders
+          const allFolderNames = new Set();
+          databaseFolders.forEach((folder) => allFolderNames.add(folder.name));
+          storageFolders.forEach((folder) => allFolderNames.add(folder.name));
+
+          const sortedFolders = Array.from(allFolderNames).sort();
+
+          // Cập nhật dropdown
+          folderSelect.innerHTML =
+            '<option value="">📁 Chọn thư mục...</option>';
+
+          sortedFolders.forEach((folderName) => {
+            const dbInfo = databaseFolders.find((f) => f.name === folderName);
+            const storageInfo = storageFolders.find(
+              (f) => f.name === folderName
+            );
+
+            const submissionCount = dbInfo ? dbInfo.submission_count : 0;
+            const fileCount = storageInfo ? storageInfo.file_count : 0;
+
+            const option = document.createElement("option");
+            option.value = folderName;
+            option.textContent = `📁 ${folderName} (${submissionCount} records, ${fileCount} files)`;
+            folderSelect.appendChild(option);
+          });
+
+          // Hiển thị thông tin
+          folderInfo.innerHTML = `
               <strong>📊 Thống kê:</strong><br>
               • Tổng số thư mục: ${sortedFolders.length}<br>
               • Database: ${databaseFolders.length} thư mục<br>
               • Storage: ${storageFolders.length} thư mục<br>
               • Cập nhật: ${new Date().toLocaleString()}
             `;
-            folderInfo.style.display = "block";
-      
-            showMessage("✅ Tải danh sách thư mục thành công!", "success");
-            
-          } catch (error) {
-            console.error("Error loading folders:", error);
-            folderSelect.innerHTML = '<option value="">❌ Lỗi tải dữ liệu</option>';
-            showMessage(`❌ Lỗi tải thư mục: ${error.message}`, "error");
-          } finally {
-            folderSelect.disabled = false;
+          folderInfo.style.display = "block";
+
+          showMessage("✅ Tải danh sách thư mục thành công!", "success");
+        } catch (error) {
+          console.error("Error loading folders:", error);
+          folderSelect.innerHTML =
+            '<option value="">❌ Lỗi tải dữ liệu</option>';
+          showMessage(`❌ Lỗi tải thư mục: ${error.message}`, "error");
+        } finally {
+          folderSelect.disabled = false;
+        }
+      }
+
+      // Hàm tạo thư mục mới
+      async function createNewFolder() {
+        const folderName = document
+          .getElementById("newFolderName")
+          .value.trim();
+
+        if (!folderName) {
+          showMessage("⚠️ Vui lòng nhập tên thư mục!", "warning");
+          return;
+        }
+
+        if (folderName.length > 50) {
+          showMessage(
+            "⚠️ Tên thư mục không được vượt quá 50 ký tự!",
+            "warning"
+          );
+          return;
+        }
+
+        try {
+          // Tạo một file placeholder trong thư mục mới
+          const placeholderContent = `Thư mục được tạo vào ${new Date().toISOString()}`;
+          const fileName = `${folderName}/.placeholder`;
+
+          const { data, error } = await supabase.storage
+            .from(SUPABASE_BUCKET)
+            .upload(
+              fileName,
+              new Blob([placeholderContent], { type: "text/plain" })
+            );
+
+          if (error) {
+            throw error;
           }
+
+          showMessage(`✅ Tạo thư mục "${folderName}" thành công!`, "success");
+          hideNewFolderModal();
+
+          // Reload danh sách folders
+          setTimeout(loadFolders, 1000);
+        } catch (error) {
+          console.error("Error creating folder:", error);
+          showMessage(`❌ Lỗi tạo thư mục: ${error.message}`, "error");
         }
-      
-        // Hàm tạo thư mục mới
-        async function createNewFolder() {
-          const folderName = document.getElementById("newFolderName").value.trim();
-          
-          if (!folderName) {
-            showMessage("⚠️ Vui lòng nhập tên thư mục!", "warning");
-            return;
-          }
-      
-          if (folderName.length > 50) {
-            showMessage("⚠️ Tên thư mục không được vượt quá 50 ký tự!", "warning");
-            return;
-          }
-      
-          try {
-            // Tạo một file placeholder trong thư mục mới
-            const placeholderContent = `Thư mục được tạo vào ${new Date().toISOString()}`;
-            const fileName = `${folderName}/.placeholder`;
-            
-            const { data, error } = await supabase.storage
-              .from(SUPABASE_BUCKET)
-              .upload(fileName, new Blob([placeholderContent], { type: 'text/plain' }));
-      
-            if (error) {
-              throw error;
-            }
-      
-            showMessage(`✅ Tạo thư mục "${folderName}" thành công!`, "success");
-            hideNewFolderModal();
-            
-            // Reload danh sách folders
-            setTimeout(loadFolders, 1000);
-            
-          } catch (error) {
-            console.error("Error creating folder:", error);
-            showMessage(`❌ Lỗi tạo thư mục: ${error.message}`, "error");
-          }
-        }
-      
-        // Hàm hiển thị modal tạo thư mục
-        function showNewFolderModal() {
-          document.getElementById("newFolderModal").style.display = "block";
-          document.getElementById("newFolderName").focus();
-        }
-      
-        // Hàm ẩn modal tạo thư mục
-        function hideNewFolderModal() {
-          document.getElementById("newFolderModal").style.display = "none";
-          document.getElementById("newFolderName").value = "";
-        }
-      
-        // Hàm hiển thị thông báo
-        function showMessage(message, type) {
-          const messageDiv = document.getElementById("message");
-          messageDiv.textContent = message;
-          messageDiv.className = `message ${type}`;
-          messageDiv.style.display = "block";
-          
-          // Tự động ẩn sau 5 giây
-          setTimeout(() => {
-            messageDiv.style.display = "none";
-          }, 5000);
-        }
-      
-        // Xử lý sự kiện chọn file
-        document.getElementById("file").addEventListener("change", function(e) {
-          const fileSelected = document.getElementById("fileSelected");
-          const file = e.target.files[0];
-          
-          if (file) {
-            const fileSize = (file.size / 1024 / 1024).toFixed(2);
-            fileSelected.innerHTML = `
+      }
+
+      // Hàm hiển thị modal tạo thư mục
+      function showNewFolderModal() {
+        document.getElementById("newFolderModal").style.display = "block";
+        document.getElementById("newFolderName").focus();
+      }
+
+      // Hàm ẩn modal tạo thư mục
+      function hideNewFolderModal() {
+        document.getElementById("newFolderModal").style.display = "none";
+        document.getElementById("newFolderName").value = "";
+      }
+
+      // Hàm hiển thị thông báo
+      function showMessage(message, type) {
+        const messageDiv = document.getElementById("message");
+        messageDiv.textContent = message;
+        messageDiv.className = `message ${type}`;
+        messageDiv.style.display = "block";
+
+        // Tự động ẩn sau 5 giây
+        setTimeout(() => {
+          messageDiv.style.display = "none";
+        }, 5000);
+      }
+
+      // Xử lý sự kiện chọn file
+      document.getElementById("file").addEventListener("change", function (e) {
+        const fileSelected = document.getElementById("fileSelected");
+        const file = e.target.files[0];
+
+        if (file) {
+          const fileSize = (file.size / 1024 / 1024).toFixed(2);
+          fileSelected.innerHTML = `
               <strong>📎 File đã chọn:</strong><br>
               • Tên: ${file.name}<br>
               • Kích thước: ${fileSize} MB<br>
-              • Loại: ${file.type || 'Không xác định'}
+              • Loại: ${file.type || "Không xác định"}
             `;
-            fileSelected.style.display = "block";
-          } else {
-            fileSelected.style.display = "none";
-          }
-        });
-      
-        // Xử lý submit form
-        document.getElementById("uploadForm").addEventListener("submit", async function(e) {
+          fileSelected.style.display = "block";
+        } else {
+          fileSelected.style.display = "none";
+        }
+      });
+
+      // Xử lý submit form
+      document
+        .getElementById("uploadForm")
+        .addEventListener("submit", async function (e) {
           e.preventDefault();
-          
+
           const submitBtn = document.querySelector(".submit-btn");
           const progressBar = document.getElementById("progressBar");
           const progressFill = document.getElementById("progressFill");
-          
+
           try {
             // Disable submit button
             submitBtn.disabled = true;
             submitBtn.textContent = "⏳ Đang xử lý...";
-            
+
             // Hiển thị progress bar
             progressBar.style.display = "block";
             progressFill.style.width = "10%";
-            
+
             // Lấy dữ liệu form
             const formData = new FormData(e.target);
             const file = formData.get("file");
             const folderName = formData.get("folder");
-            
+
             if (!file || !folderName) {
               throw new Error("Vui lòng chọn file và thư mục!");
             }
-            
+
             progressFill.style.width = "30%";
-            
+
             // Upload file lên Supabase Storage
             const fileName = `${folderName}/${Date.now()}_${file.name}`;
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from(SUPABASE_BUCKET)
-              .upload(fileName, file);
-            
+            const { data: uploadData, error: uploadError } =
+              await supabase.storage
+                .from(SUPABASE_BUCKET)
+                .upload(fileName, file);
+
             if (uploadError) {
               throw uploadError;
             }
-            
+
             progressFill.style.width = "70%";
-            
+
             // Lưu thông tin vào database
             const submissionData = {
               ho_ten: formData.get("ho_ten"),
@@ -794,28 +808,27 @@
               file_path: fileName,
               file_size: file.size,
               file_type: file.type,
-              created_at: new Date().toISOString()
+              created_at: new Date().toISOString(),
             };
-            
+
             const { data: dbData, error: dbError } = await supabase
               .from("submissions")
               .insert([submissionData]);
-            
+
             if (dbError) {
               throw dbError;
             }
-            
+
             progressFill.style.width = "100%";
-            
+
             showMessage("🎉 Upload thành công!", "success");
-            
+
             // Reset form
             e.target.reset();
             document.getElementById("fileSelected").style.display = "none";
-            
+
             // Reload folders để cập nhật số lượng
             setTimeout(loadFolders, 1000);
-            
           } catch (error) {
             console.error("Upload error:", error);
             showMessage(`❌ Lỗi upload: ${error.message}`, "error");
@@ -823,44 +836,51 @@
             // Reset UI
             submitBtn.disabled = false;
             submitBtn.textContent = "🚀 Gửi Thông Tin";
-            
+
             setTimeout(() => {
               progressBar.style.display = "none";
               progressFill.style.width = "0%";
             }, 2000);
           }
         });
-      
-        // Xử lý sự kiện nhấn Enter trong modal
-        document.getElementById("newFolderName").addEventListener("keypress", function(e) {
+
+      // Xử lý sự kiện nhấn Enter trong modal
+      document
+        .getElementById("newFolderName")
+        .addEventListener("keypress", function (e) {
           if (e.key === "Enter") {
             createNewFolder();
           }
         });
-      
-        // Xử lý click outside modal để đóng
-        document.getElementById("newFolderModal").addEventListener("click", function(e) {
+
+      // Xử lý click outside modal để đóng
+      document
+        .getElementById("newFolderModal")
+        .addEventListener("click", function (e) {
           if (e.target === this) {
             hideNewFolderModal();
           }
         });
-      
-        // Load folders khi trang được tải
-        document.addEventListener("DOMContentLoaded", function() {
-          console.log("Page loaded, initializing Supabase connection...");
-          
-          // Kiểm tra cấu hình
-          if (SUPABASE_URL.includes("YOUR_SUPABASE_URL")) {
-            showMessage("⚠️ Vui lòng cấu hình Supabase URL và API Key trong code", "warning");
-            return;
-          }
-          
-          // Auto load folders
-          loadFolders();
-        });
-      
-        // Auto refresh folders mỗi 5 phút
-        setInterval(loadFolders, 300000);
-      </script>
+
+      // Load folders khi trang được tải
+      document.addEventListener("DOMContentLoaded", function () {
+        console.log("Page loaded, initializing Supabase connection...");
+
+        // Kiểm tra cấu hình
+        if (SUPABASE_URL.includes("YOUR_SUPABASE_URL")) {
+          showMessage(
+            "⚠️ Vui lòng cấu hình Supabase URL và API Key trong code",
+            "warning"
+          );
+          return;
+        }
+
+        // Auto load folders
+        loadFolders();
+      });
+
+      // Auto refresh folders mỗi 5 phút
+      setInterval(loadFolders, 300000);
+    </script>
   </body>
 </html>

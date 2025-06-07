@@ -1147,5 +1147,608 @@ def cleanup_empty_folders():
             'success': False,
             'error': f'Lỗi dọn dẹp thư mục: {str(e)}'
         }), 500
+        
+@app.route('/api/submissions', methods=['GET'])
+def get_submissions():
+    """
+    API để lấy danh sách submissions với tính năng filter, sort, pagination
+    
+    Query Parameters:
+    - page: Số trang (default: 1)
+    - limit: Số record per page (default: 10, max: 100)
+    - sort_by: Trường để sort (default: upload_time)
+    - sort_order: asc hoặc desc (default: desc)
+    - folder: Filter theo folder
+    - search: Tìm kiếm theo tên hoặc đề tài
+    - date_from: Lọc từ ngày (YYYY-MM-DD)
+    - date_to: Lọc đến ngày (YYYY-MM-DD)
+    - has_file: true/false - Lọc có file hay không
+    """
+    try:
+        # Lấy query parameters
+        page = int(request.args.get('page', 1))
+        limit = min(int(request.args.get('limit', 10)), 100)  # Max 100 records per page
+        sort_by = request.args.get('sort_by', 'upload_time')
+        sort_order = request.args.get('sort_order', 'desc').lower()
+        folder_filter = request.args.get('folder', '').strip()
+        search_query = request.args.get('search', '').strip()
+        date_from = request.args.get('date_from', '').strip()
+        date_to = request.args.get('date_to', '').strip()
+        has_file_filter = request.args.get('has_file', '').strip().lower()
+        
+        # Validate parameters
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 10
+        if sort_order not in ['asc', 'desc']:
+            sort_order = 'desc'
+        
+        # Allowed sort fields
+        allowed_sort_fields = ['upload_time', 'ho_ten', 'ten_de_tai', 'gio_quy_doi', 'folder_name', 'file_size']
+        if sort_by not in allowed_sort_fields:
+            sort_by = 'upload_time'
+        
+        # Handle demo mode
+        if DEMO_MODE:
+            # Generate demo data
+            demo_submissions = []
+            for i in range(1, 25):  # 24 demo records
+                demo_submissions.append({
+                    'id': i,
+                    'ho_ten': f'Demo User {i}',
+                    'ten_de_tai': f'Demo Project {i}',
+                    'noi_cong_tac': f'Demo Company {i}',
+                    'khoa_phong': f'Demo Department {i}',
+                    'gio_quy_doi': round(i * 1.5, 2),
+                    'minh_chung': f'Demo evidence {i}',
+                    'ghi_chu': f'Demo note {i}',
+                    'file_name': f'demo_file_{i}.pdf' if i % 2 == 0 else None,
+                    'file_url': f'https://demo.example.com/demo_file_{i}.pdf' if i % 2 == 0 else None,
+                    'file_size': i * 1024 if i % 2 == 0 else 0,
+                    'folder_name': f'Demo Folder {(i % 5) + 1}' if i % 3 == 0 else None,
+                    'upload_time': (datetime.datetime.now() - datetime.timedelta(days=i)).isoformat(),
+                    'upload_ip': '127.0.0.1',
+                    'storage_path': f'demo-folder-{(i % 5) + 1}/demo_file_{i}.pdf' if i % 2 == 0 else None
+                })
+            
+            # Apply filters to demo data
+            filtered_submissions = demo_submissions
+            
+            # Apply search filter
+            if search_query:
+                filtered_submissions = [
+                    s for s in filtered_submissions 
+                    if search_query.lower() in s['ho_ten'].lower() or 
+                       search_query.lower() in s['ten_de_tai'].lower()
+                ]
+            
+            # Apply folder filter
+            if folder_filter:
+                filtered_submissions = [
+                    s for s in filtered_submissions 
+                    if s['folder_name'] and folder_filter.lower() in s['folder_name'].lower()
+                ]
+            
+            # Apply has_file filter
+            if has_file_filter == 'true':
+                filtered_submissions = [s for s in filtered_submissions if s['file_name']]
+            elif has_file_filter == 'false':
+                filtered_submissions = [s for s in filtered_submissions if not s['file_name']]
+            
+            # Apply sorting
+            reverse_sort = sort_order == 'desc'
+            filtered_submissions.sort(key=lambda x: x.get(sort_by, ''), reverse=reverse_sort)
+            
+            # Apply pagination
+            offset = (page - 1) * limit
+            paginated_submissions = filtered_submissions[offset:offset + limit]
+            
+            return jsonify({
+                'success': True,
+                'data': paginated_submissions,
+                'pagination': {
+                    'current_page': page,
+                    'per_page': limit,
+                    'total_records': len(filtered_submissions),
+                    'total_pages': math.ceil(len(filtered_submissions) / limit),
+                    'has_next': page < math.ceil(len(filtered_submissions) / limit),
+                    'has_prev': page > 1
+                },
+                'filters': {
+                    'folder': folder_filter,
+                    'search': search_query,
+                    'date_from': date_from,
+                    'date_to': date_to,
+                    'has_file': has_file_filter,
+                    'sort_by': sort_by,
+                    'sort_order': sort_order
+                },
+                'demo_mode': True
+            })
+        
+        # Real Supabase query
+        query = supabase.table('submissions').select('*')
+        
+        # Apply filters
+        if folder_filter:
+            query = query.ilike('folder_name', f'%{folder_filter}%')
+        
+        if search_query:
+            # Search in multiple fields
+            query = query.or_(f'ho_ten.ilike.%{search_query}%,ten_de_tai.ilike.%{search_query}%')
+        
+        if date_from:
+            try:
+                # Convert date format
+                date_from_formatted = datetime.datetime.strptime(date_from, '%Y-%m-%d').isoformat()
+                query = query.gte('upload_time', date_from_formatted)
+            except ValueError:
+                pass  # Invalid date format, ignore
+        
+        if date_to:
+            try:
+                # Convert date format and add end of day
+                date_to_formatted = datetime.datetime.strptime(date_to, '%Y-%m-%d')
+                date_to_formatted = date_to_formatted.replace(hour=23, minute=59, second=59).isoformat()
+                query = query.lte('upload_time', date_to_formatted)
+            except ValueError:
+                pass  # Invalid date format, ignore
+        
+        if has_file_filter == 'true':
+            query = query.not_.is_('file_name', 'null')
+        elif has_file_filter == 'false':
+            query = query.is_('file_name', 'null')
+        
+        # Get total count (before pagination)
+        count_result = query.execute()
+        total_records = len(count_result.data)
+        
+        # Apply sorting and pagination
+        query = query.order(sort_by, desc=(sort_order == 'desc'))
+        
+        # Apply pagination
+        offset = (page - 1) * limit
+        query = query.limit(limit).offset(offset)
+        
+        # Execute query
+        result = query.execute()
+        
+        # Process results
+        submissions = []
+        for submission in result.data:
+            # Format file size
+            file_size = submission.get('file_size', 0)
+            if file_size:
+                file_size_human = format_file_size(file_size)
+            else:
+                file_size_human = '0 B'
+            
+            # Format upload time
+            upload_time = submission.get('upload_time')
+            if upload_time:
+                try:
+                    upload_datetime = datetime.datetime.fromisoformat(upload_time.replace('Z', '+00:00'))
+                    upload_time_formatted = upload_datetime.strftime('%d/%m/%Y %H:%M')
+                except:
+                    upload_time_formatted = upload_time
+            else:
+                upload_time_formatted = 'N/A'
+            
+            processed_submission = {
+                **submission,
+                'file_size_human': file_size_human,
+                'upload_time_formatted': upload_time_formatted,
+                'has_file': bool(submission.get('file_name')),
+                'folder_display': submission.get('folder_name') or 'Không có thư mục'
+            }
+            
+            submissions.append(processed_submission)
+        
+        # Calculate pagination info
+        total_pages = math.ceil(total_records / limit)
+        
+        return jsonify({
+            'success': True,
+            'data': submissions,
+            'pagination': {
+                'current_page': page,
+                'per_page': limit,
+                'total_records': total_records,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1,
+                'offset': offset
+            },
+            'filters': {
+                'folder': folder_filter,
+                'search': search_query,
+                'date_from': date_from,
+                'date_to': date_to,
+                'has_file': has_file_filter,
+                'sort_by': sort_by,
+                'sort_order': sort_order
+            },
+            'demo_mode': False
+        })
+        
+    except Exception as e:
+        print(f"Error in get_submissions: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi lấy danh sách submissions: {str(e)}'
+        }), 500
+
+@app.route('/api/submissions/<int:submission_id>', methods=['GET'])
+def get_submission_detail(submission_id):
+    """API để lấy chi tiết một submission"""
+    try:
+        if DEMO_MODE:
+            # Return demo data
+            return jsonify({
+                'success': True,
+                'data': {
+                    'id': submission_id,
+                    'ho_ten': f'Demo User {submission_id}',
+                    'ten_de_tai': f'Demo Project {submission_id}',
+                    'noi_cong_tac': f'Demo Company {submission_id}',
+                    'khoa_phong': f'Demo Department {submission_id}',
+                    'gio_quy_doi': submission_id * 1.5,
+                    'minh_chung': f'Demo evidence {submission_id}',
+                    'ghi_chu': f'Demo note {submission_id}',
+                    'file_name': f'demo_file_{submission_id}.pdf',
+                    'file_url': f'https://demo.example.com/demo_file_{submission_id}.pdf',
+                    'file_size': submission_id * 1024,
+                    'file_size_human': format_file_size(submission_id * 1024),
+                    'folder_name': f'Demo Folder {submission_id}',
+                    'upload_time': datetime.datetime.now().isoformat(),
+                    'upload_ip': '127.0.0.1',
+                    'storage_path': f'demo-folder-{submission_id}/demo_file_{submission_id}.pdf'
+                },
+                'demo_mode': True
+            })
+        
+        # Real query
+        result = supabase.table('submissions').select('*').eq('id', submission_id).single().execute()
+        
+        if not result.data:
+            return jsonify({
+                'success': False,
+                'error': 'Không tìm thấy submission'
+            }), 404
+        
+        submission = result.data
+        
+        # Add formatted fields
+        submission['file_size_human'] = format_file_size(submission.get('file_size', 0))
+        submission['has_file'] = bool(submission.get('file_name'))
+        submission['folder_display'] = submission.get('folder_name') or 'Không có thư mục'
+        
+        # Format upload time
+        upload_time = submission.get('upload_time')
+        if upload_time:
+            try:
+                upload_datetime = datetime.datetime.fromisoformat(upload_time.replace('Z', '+00:00'))
+                submission['upload_time_formatted'] = upload_datetime.strftime('%d/%m/%Y %H:%M:%S')
+            except:
+                submission['upload_time_formatted'] = upload_time
+        
+        return jsonify({
+            'success': True,
+            'data': submission
+        })
+        
+    except Exception as e:
+        print(f"Error in get_submission_detail: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi lấy chi tiết submission: {str(e)}'
+        }), 500
+
+@app.route('/api/submissions/<int:submission_id>', methods=['PUT'])
+def update_submission(submission_id):
+    """API để cập nhật một submission"""
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': True,
+                'message': 'Demo mode: Cập nhật thành công (giả lập)',
+                'demo_mode': True
+            })
+        
+        # Get request data
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Không có dữ liệu để cập nhật'
+            }), 400
+        
+        # Allowed fields to update
+        allowed_fields = [
+            'ho_ten', 'ten_de_tai', 'noi_cong_tac', 'khoa_phong', 
+            'gio_quy_doi', 'minh_chung', 'ghi_chu', 'folder_name'
+        ]
+        
+        # Filter and validate data
+        update_data = {}
+        for field in allowed_fields:
+            if field in data:
+                value = data[field]
+                if field == 'gio_quy_doi':
+                    try:
+                        value = float(value)
+                    except (ValueError, TypeError):
+                        value = 0.0
+                elif field == 'folder_name' and value:
+                    # Validate folder name
+                    safe_folder_name = secure_folder_name(value)
+                    if not safe_folder_name:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Tên thư mục không hợp lệ'
+                        }), 400
+                    value = safe_folder_name
+                
+                update_data[field] = value
+        
+        if not update_data:
+            return jsonify({
+                'success': False,
+                'error': 'Không có dữ liệu hợp lệ để cập nhật'
+            }), 400
+        
+        # Update in database
+        result = supabase.table('submissions').update(update_data).eq('id', submission_id).execute()
+        
+        if not result.data:
+            return jsonify({
+                'success': False,
+                'error': 'Không tìm thấy hoặc không thể cập nhật submission'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'message': 'Cập nhật submission thành công',
+            'data': result.data[0]
+        })
+        
+    except Exception as e:
+        print(f"Error in update_submission: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi cập nhật submission: {str(e)}'
+        }), 500
+
+@app.route('/api/submissions/<int:submission_id>', methods=['DELETE'])
+def delete_submission(submission_id):
+    """API để xóa một submission"""
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': True,
+                'message': 'Demo mode: Xóa thành công (giả lập)',
+                'demo_mode': True
+            })
+        
+        # Get submission info first
+        submission_result = supabase.table('submissions').select('*').eq('id', submission_id).single().execute()
+        
+        if not submission_result.data:
+            return jsonify({
+                'success': False,
+                'error': 'Không tìm thấy submission'
+            }), 404
+        
+        submission = submission_result.data
+        storage_path = submission.get('storage_path')
+        
+        # Delete file from storage if exists
+        if storage_path:
+            try:
+                delete_result = supabase.storage.from_(SUPABASE_BUCKET).remove([storage_path])
+                print(f"File deleted from storage: {storage_path}")
+            except Exception as storage_error:
+                print(f"Error deleting file from storage: {str(storage_error)}")
+                # Continue with database deletion even if file deletion fails
+        
+        # Delete from database
+        delete_result = supabase.table('submissions').delete().eq('id', submission_id).execute()
+        
+        if not delete_result.data:
+            return jsonify({
+                'success': False,
+                'error': 'Không thể xóa submission'
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'message': 'Xóa submission thành công',
+            'deleted_file': storage_path
+        })
+        
+    except Exception as e:
+        print(f"Error in delete_submission: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi xóa submission: {str(e)}'
+        }), 500
+
+@app.route('/api/submissions/stats', methods=['GET'])
+def get_submissions_stats():
+    """API để lấy thống kê submissions"""
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'total_submissions': 24,
+                    'submissions_with_files': 12,
+                    'submissions_without_files': 12,
+                    'total_file_size': 24576,
+                    'total_file_size_human': format_file_size(24576),
+                    'total_folders': 5,
+                    'avg_file_size': 2048,
+                    'avg_file_size_human': format_file_size(2048),
+                    'submissions_by_folder': {
+                        'Demo Folder 1': 5,
+                        'Demo Folder 2': 4,
+                        'Demo Folder 3': 3,
+                        'Không có thư mục': 12
+                    },
+                    'submissions_by_month': {
+                        '2024-01': 8,
+                        '2024-02': 10,
+                        '2024-03': 6
+                    },
+                    'file_types': {
+                        'pdf': 8,
+                        'docx': 3,
+                        'xlsx': 1
+                    }
+                },
+                'demo_mode': True
+            })
+        
+        # Real statistics
+        result = supabase.table('submissions').select('*').execute()
+        submissions = result.data
+        
+        total_submissions = len(submissions)
+        submissions_with_files = len([s for s in submissions if s.get('file_name')])
+        submissions_without_files = total_submissions - submissions_with_files
+        
+        # File size statistics
+        file_sizes = [s.get('file_size', 0) for s in submissions if s.get('file_size')]
+        total_file_size = sum(file_sizes)
+        avg_file_size = total_file_size / len(file_sizes) if file_sizes else 0
+        
+        # Folder statistics
+        folder_counts = {}
+        for submission in submissions:
+            folder = submission.get('folder_name') or 'Không có thư mục'
+            folder_counts[folder] = folder_counts.get(folder, 0) + 1
+        
+        # Monthly statistics
+        monthly_counts = {}
+        for submission in submissions:
+            upload_time = submission.get('upload_time')
+            if upload_time:
+                try:
+                    date = datetime.datetime.fromisoformat(upload_time.replace('Z', '+00:00'))
+                    month_key = date.strftime('%Y-%m')
+                    monthly_counts[month_key] = monthly_counts.get(month_key, 0) + 1
+                except:
+                    pass
+        
+        # File type statistics
+        file_type_counts = {}
+        for submission in submissions:
+            file_name = submission.get('file_name')
+            if file_name and '.' in file_name:
+                ext = file_name.split('.')[-1].lower()
+                file_type_counts[ext] = file_type_counts.get(ext, 0) + 1
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_submissions': total_submissions,
+                'submissions_with_files': submissions_with_files,
+                'submissions_without_files': submissions_without_files,
+                'total_file_size': total_file_size,
+                'total_file_size_human': format_file_size(total_file_size),
+                'total_folders': len([f for f in folder_counts.keys() if f != 'Không có thư mục']),
+                'avg_file_size': int(avg_file_size),
+                'avg_file_size_human': format_file_size(avg_file_size),
+                'submissions_by_folder': folder_counts,
+                'submissions_by_month': monthly_counts,
+                'file_types': file_type_counts
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error in get_submissions_stats: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi lấy thống kê submissions: {str(e)}'
+        }), 500
+
+@app.route('/api/submissions/bulk-delete', methods=['POST'])
+def bulk_delete_submissions():
+    """API để xóa nhiều submissions cùng lúc"""
+    try:
+        data = request.get_json()
+        if not data or 'ids' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'Vui lòng cung cấp danh sách IDs'
+            }), 400
+        
+        submission_ids = data['ids']
+        if not isinstance(submission_ids, list) or not submission_ids:
+            return jsonify({
+                'success': False,
+                'error': 'Danh sách IDs không hợp lệ'
+            }), 400
+        
+        if DEMO_MODE:
+            return jsonify({
+                'success': True,
+                'message': f'Demo mode: Đã xóa {len(submission_ids)} submissions (giả lập)',
+                'deleted_count': len(submission_ids),
+                'demo_mode': True
+            })
+        
+        # Get submissions info first
+        submissions_result = supabase.table('submissions').select('*').in_('id', submission_ids).execute()
+        
+        if not submissions_result.data:
+            return jsonify({
+                'success': False,
+                'error': 'Không tìm thấy submissions nào'
+            }), 404
+        
+        # Collect storage paths
+        storage_paths = []
+        for submission in submissions_result.data:
+            storage_path = submission.get('storage_path')
+            if storage_path:
+                storage_paths.append(storage_path)
+        
+        # Delete files from storage
+        deleted_files = []
+        failed_files = []
+        
+        if storage_paths:
+            try:
+                delete_result = supabase.storage.from_(SUPABASE_BUCKET).remove(storage_paths)
+                deleted_files = storage_paths
+                print(f"Bulk deleted files from storage: {storage_paths}")
+            except Exception as storage_error:
+                print(f"Error bulk deleting files from storage: {str(storage_error)}")
+                failed_files = storage_paths
+        
+        # Delete from database
+        delete_result = supabase.table('submissions').delete().in_('id', submission_ids).execute()
+        
+        deleted_count = len(delete_result.data) if delete_result.data else 0
+        
+        return jsonify({
+            'success': True,
+            'message': f'Đã xóa {deleted_count} submissions thành công',
+            'deleted_count': deleted_count,
+            'deleted_files': len(deleted_files),
+            'failed_files': len(failed_files),
+            'storage_errors': failed_files if failed_files else None
+        })
+        
+    except Exception as e:
+        print(f"Error in bulk_delete_submissions: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi xóa submissions: {str(e)}'
+        }), 500
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
