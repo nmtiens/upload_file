@@ -580,12 +580,17 @@ def get_all_folders():
         try:
             db_result = supabase.table('submissions').select('folder_name').execute()
             
+            # Kiểm tra kết quả database
+            print(f"Database result: {db_result}")
+            
             # Đếm số lượng submissions theo folder
             folder_counts = {}
-            for item in db_result.data:
-                folder_name = item.get('folder_name')
-                if folder_name:
-                    folder_counts[folder_name] = folder_counts.get(folder_name, 0) + 1
+            if db_result.data:
+                for item in db_result.data:
+                    folder_name = item.get('folder_name')
+                    if folder_name and folder_name.strip():
+                        folder_name = folder_name.strip()
+                        folder_counts[folder_name] = folder_counts.get(folder_name, 0) + 1
             
             # Format database folders
             for folder_name, count in folder_counts.items():
@@ -594,21 +599,40 @@ def get_all_folders():
                     'source': 'database',
                     'submission_count': count
                 })
+                
         except Exception as db_error:
             print(f"Error getting folders from database: {str(db_error)}")
         
         # 2. Lấy folders từ Storage
         try:
+            # Thử nhiều cách để lấy dữ liệu từ storage
+            print(f"Trying to access bucket: {SUPABASE_BUCKET}")
+            
+            # Cách 1: List tất cả files
             storage_result = supabase.storage.from_(SUPABASE_BUCKET).list()
+            print(f"Storage result: {storage_result}")
             
             if storage_result:
                 storage_folders = {}
                 
                 for file_item in storage_result:
-                    file_name = file_item['name']
+                    print(f"Processing file item: {file_item}")
                     
+                    file_name = file_item.get('name', '')
+                    
+                    # Kiểm tra nếu là folder (không có extension hoặc có dấu /)
                     if '/' in file_name:
+                        # File trong subfolder
                         folder_name = file_name.split('/')[0]
+                    elif '.' not in file_name:
+                        # Có thể là folder
+                        folder_name = file_name
+                    else:
+                        # File ở root level
+                        continue
+                    
+                    if folder_name and folder_name.strip():
+                        folder_name = folder_name.strip()
                         
                         if folder_name not in storage_folders:
                             storage_folders[folder_name] = {
@@ -619,17 +643,44 @@ def get_all_folders():
                                 'last_modified': None
                             }
                         
-                        file_size = file_item.get('metadata', {}).get('size', 0) or 0
-                        storage_folders[folder_name]['file_count'] += 1
-                        storage_folders[folder_name]['total_size'] += file_size
-                        
-                        # Cập nhật thời gian sửa đổi cuối
-                        file_updated = file_item.get('updated_at')
-                        if file_updated and (not storage_folders[folder_name]['last_modified'] or 
-                                           file_updated > storage_folders[folder_name]['last_modified']):
-                            storage_folders[folder_name]['last_modified'] = file_updated
+                        # Chỉ đếm nếu là file thực sự (có extension)
+                        if '/' in file_name or '.' in file_name:
+                            file_size = 0
+                            if 'metadata' in file_item and file_item['metadata']:
+                                file_size = file_item['metadata'].get('size', 0) or 0
+                            
+                            storage_folders[folder_name]['file_count'] += 1
+                            storage_folders[folder_name]['total_size'] += file_size
+                            
+                            # Cập nhật thời gian sửa đổi cuối
+                            file_updated = file_item.get('updated_at')
+                            if file_updated and (not storage_folders[folder_name]['last_modified'] or 
+                                               file_updated > storage_folders[folder_name]['last_modified']):
+                                storage_folders[folder_name]['last_modified'] = file_updated
                 
                 folders_data['storage_folders'] = list(storage_folders.values())
+                
+            # Cách 2: Nếu cách 1 không work, thử list với recursive
+            if not folders_data['storage_folders']:
+                try:
+                    # Thử list với options khác
+                    storage_result_alt = supabase.storage.from_(SUPABASE_BUCKET).list(path="", options={"limit": 1000})
+                    print(f"Alternative storage result: {storage_result_alt}")
+                    
+                    if storage_result_alt:
+                        for item in storage_result_alt:
+                            folder_name = item.get('name', '').strip()
+                            if folder_name and folder_name not in [f['name'] for f in folders_data['storage_folders']]:
+                                folders_data['storage_folders'].append({
+                                    'name': folder_name,
+                                    'source': 'storage',
+                                    'file_count': 0,
+                                    'total_size': 0,
+                                    'last_modified': item.get('updated_at')
+                                })
+                except Exception as alt_error:
+                    print(f"Alternative storage method failed: {str(alt_error)}")
+                    
         except Exception as storage_error:
             print(f"Error getting folders from storage: {str(storage_error)}")
         
@@ -666,6 +717,11 @@ def get_all_folders():
             
             folders_data['combined_folders'].append(combined_folder)
         
+        # Debug output
+        print(f"Final result - Database folders: {len(folders_data['database_folders'])}")
+        print(f"Final result - Storage folders: {len(folders_data['storage_folders'])}")
+        print(f"Final result - Combined folders: {len(folders_data['combined_folders'])}")
+        
         return jsonify({
             'success': True,
             'data': folders_data,
@@ -680,6 +736,8 @@ def get_all_folders():
         
     except Exception as e:
         print(f"Error in get_all_folders: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': f'Lỗi lấy danh sách folder: {str(e)}'
@@ -689,17 +747,43 @@ def get_all_folders():
 def get_folders_simple():
     """API đơn giản để lấy danh sách tên folder (cho dropdown)"""
     try:
-        # Lấy từ database
-        result = supabase.table('submissions').select('folder_name').execute()
-        
         folder_names = set()
-        for item in result.data:
-            folder_name = item.get('folder_name')
-            if folder_name and folder_name.strip():
-                folder_names.add(folder_name.strip())
+        
+        # Lấy từ database
+        try:
+            result = supabase.table('submissions').select('folder_name').execute()
+            print(f"Database folders result: {result}")
+            
+            if result.data:
+                for item in result.data:
+                    folder_name = item.get('folder_name')
+                    if folder_name and folder_name.strip():
+                        folder_names.add(folder_name.strip())
+        except Exception as db_error:
+            print(f"Database error in simple folders: {str(db_error)}")
+        
+        # Lấy từ storage
+        try:
+            storage_result = supabase.storage.from_(SUPABASE_BUCKET).list()
+            print(f"Storage folders result: {storage_result}")
+            
+            if storage_result:
+                for item in storage_result:
+                    folder_name = item.get('name', '').strip()
+                    if folder_name:
+                        # Nếu có dấu /, lấy phần đầu
+                        if '/' in folder_name:
+                            folder_name = folder_name.split('/')[0]
+                        # Nếu không có extension, có thể là folder
+                        if '.' not in folder_name:
+                            folder_names.add(folder_name)
+        except Exception as storage_error:
+            print(f"Storage error in simple folders: {str(storage_error)}")
         
         # Sắp xếp theo alphabet
         sorted_folders = sorted(list(folder_names))
+        
+        print(f"Final folders list: {sorted_folders}")
         
         return jsonify({
             'success': True,
@@ -708,9 +792,76 @@ def get_folders_simple():
         })
         
     except Exception as e:
+        print(f"Error in get_folders_simple: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': f'Lỗi lấy danh sách folder: {str(e)}'
+        }), 500
+
+# Thêm endpoint debug để kiểm tra storage
+@app.route('/api/debug/storage', methods=['GET'])
+def debug_storage():
+    """Debug endpoint để kiểm tra storage"""
+    try:
+        print(f"Debugging storage bucket: {SUPABASE_BUCKET}")
+        
+        # Thử nhiều cách khác nhau
+        methods_results = {}
+        
+        # Method 1: Basic list
+        try:
+            result1 = supabase.storage.from_(SUPABASE_BUCKET).list()
+            methods_results['basic_list'] = {
+                'success': True,
+                'data': result1,
+                'count': len(result1) if result1 else 0
+            }
+        except Exception as e:
+            methods_results['basic_list'] = {
+                'success': False,
+                'error': str(e)
+            }
+        
+        # Method 2: List with path
+        try:
+            result2 = supabase.storage.from_(SUPABASE_BUCKET).list(path="")
+            methods_results['list_with_path'] = {
+                'success': True,
+                'data': result2,
+                'count': len(result2) if result2 else 0
+            }
+        except Exception as e:
+            methods_results['list_with_path'] = {
+                'success': False,
+                'error': str(e)
+            }
+        
+        # Method 3: List with options
+        try:
+            result3 = supabase.storage.from_(SUPABASE_BUCKET).list(path="", options={"limit": 100})
+            methods_results['list_with_options'] = {
+                'success': True,
+                'data': result3,
+                'count': len(result3) if result3 else 0
+            }
+        except Exception as e:
+            methods_results['list_with_options'] = {
+                'success': False,
+                'error': str(e)
+            }
+        
+        return jsonify({
+            'success': True,
+            'bucket': SUPABASE_BUCKET,
+            'methods': methods_results
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
 @app.route('/api/folders/stats', methods=['GET'])
