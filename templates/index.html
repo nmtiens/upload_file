@@ -199,24 +199,6 @@
         flex: 1;
       }
 
-      .new-folder-btn {
-        background: #28a745;
-        color: white;
-        border: none;
-        padding: 12px 20px;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        font-size: 1em;
-        white-space: nowrap;
-      }
-
-      .new-folder-btn:hover {
-        background: #218838;
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
-      }
-
       .refresh-folder-btn {
         background: #17a2b8;
         color: white;
@@ -232,16 +214,6 @@
         background: #138496;
         transform: translateY(-2px);
         box-shadow: 0 5px 15px rgba(23, 162, 184, 0.3);
-      }
-
-      .folder-info {
-        margin-top: 10px;
-        padding: 10px;
-        background: #e8f4fd;
-        border-radius: 5px;
-        color: #0c5460;
-        font-size: 0.9em;
-        display: none;
       }
 
       .file-selected {
@@ -274,61 +246,6 @@
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         width: 0%;
         transition: width 0.3s ease;
-      }
-
-      .modal {
-        display: none;
-        position: fixed;
-        z-index: 1000;
-        left: 0;
-        top: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.5);
-      }
-
-      .modal-content {
-        background-color: white;
-        margin: 15% auto;
-        padding: 20px;
-        border-radius: 10px;
-        width: 80%;
-        max-width: 400px;
-        text-align: center;
-      }
-
-      .modal input {
-        width: 100%;
-        padding: 10px;
-        margin: 10px 0;
-        border: 2px solid #ddd;
-        border-radius: 5px;
-        font-size: 1em;
-      }
-
-      .modal-buttons {
-        display: flex;
-        gap: 10px;
-        justify-content: center;
-        margin-top: 15px;
-      }
-
-      .modal-btn {
-        padding: 10px 20px;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 1em;
-      }
-
-      .modal-btn.primary {
-        background: #28a745;
-        color: white;
-      }
-
-      .modal-btn.secondary {
-        background: #6c757d;
-        color: white;
       }
 
       @media (max-width: 768px) {
@@ -378,7 +295,6 @@
               <input type="text" id="ho_ten" name="ho_ten" required />
             </div>
 
-            <!-- Thêm trường Khoa/Phòng vào form - THÊM SAU TRƯỜNG "Nơi Công Tác" -->
             <div class="form-group">
               <label for="khoa_phong"
                 >Khoa/Phòng <span class="required">*</span></label
@@ -393,7 +309,7 @@
             </div>
 
             <div class="form-group">
-              <label for="noi_cong_tac">Nơi Cộng Tác</label>
+              <label for="noi_cong_tac">Nơi Công Tác</label>
               <input type="text" id="noi_cong_tac" name="noi_cong_tac" />
             </div>
           </div>
@@ -446,20 +362,12 @@
               </div>
               <button
                 type="button"
-                class="new-folder-btn"
-                onclick="showNewFolderModal()"
-              >
-                ➕ Tạo mới
-              </button>
-              <button
-                type="button"
                 class="refresh-folder-btn"
                 onclick="loadFolders()"
               >
                 🔄
               </button>
             </div>
-            <div id="folderInfo" class="folder-info"></div>
           </div>
 
           <!-- File upload -->
@@ -485,27 +393,6 @@
 
           <button type="submit" class="submit-btn">🚀 Gửi Thông Tin</button>
         </form>
-      </div>
-    </div>
-
-    <!-- Modal tạo thư mục mới -->
-    <div id="newFolderModal" class="modal">
-      <div class="modal-content">
-        <h3>📁 Tạo Thư Mục Mới</h3>
-        <input
-          type="text"
-          id="newFolderName"
-          placeholder="Nhập tên thư mục..."
-          maxlength="50"
-        />
-        <div class="modal-buttons">
-          <button class="modal-btn primary" onclick="createNewFolder()">
-            Tạo
-          </button>
-          <button class="modal-btn secondary" onclick="hideNewFolderModal()">
-            Hủy
-          </button>
-        </div>
       </div>
     </div>
 
@@ -535,19 +422,13 @@
             throw error;
           }
 
-          // Đếm số lượng submissions theo folder
-          const folderCounts = {};
-          data.forEach((item) => {
-            const folderName = item.folder_name?.trim();
-            if (folderName) {
-              folderCounts[folderName] = (folderCounts[folderName] || 0) + 1;
-            }
-          });
-
-          return Object.entries(folderCounts).map(([name, count]) => ({
-            name,
-            submission_count: count,
-          }));
+          // Lấy danh sách unique folders
+          const uniqueFolders = [
+            ...new Set(
+              data.map((item) => item.folder_name?.trim()).filter(Boolean)
+            ),
+          ];
+          return uniqueFolders;
         } catch (error) {
           console.error("Database query error:", error);
           return [];
@@ -565,7 +446,7 @@
             throw error;
           }
 
-          const storageFolders = {};
+          const storageFolders = new Set();
 
           data.forEach((item) => {
             const fileName = item.name;
@@ -580,18 +461,11 @@
             }
 
             if (folderName && folderName.trim()) {
-              const trimmedName = folderName.trim();
-              if (!storageFolders[trimmedName]) {
-                storageFolders[trimmedName] = {
-                  name: trimmedName,
-                  file_count: 0,
-                };
-              }
-              storageFolders[trimmedName].file_count += 1;
+              storageFolders.add(folderName.trim());
             }
           });
 
-          return Object.values(storageFolders);
+          return Array.from(storageFolders);
         } catch (error) {
           console.error("Storage query error:", error);
           return [];
@@ -601,7 +475,6 @@
       // Hàm load folders và cập nhật dropdown
       async function loadFolders() {
         const folderSelect = document.getElementById("folder_select");
-        const folderInfo = document.getElementById("folderInfo");
 
         try {
           // Hiển thị loading state
@@ -615,40 +488,19 @@
           ]);
 
           // Kết hợp và sắp xếp danh sách folders
-          const allFolderNames = new Set();
-          databaseFolders.forEach((folder) => allFolderNames.add(folder.name));
-          storageFolders.forEach((folder) => allFolderNames.add(folder.name));
-
-          const sortedFolders = Array.from(allFolderNames).sort();
+          const allFolders = new Set([...databaseFolders, ...storageFolders]);
+          const sortedFolders = Array.from(allFolders).sort();
 
           // Cập nhật dropdown
           folderSelect.innerHTML =
             '<option value="">📁 Chọn thư mục...</option>';
 
           sortedFolders.forEach((folderName) => {
-            const dbInfo = databaseFolders.find((f) => f.name === folderName);
-            const storageInfo = storageFolders.find(
-              (f) => f.name === folderName
-            );
-
-            const submissionCount = dbInfo ? dbInfo.submission_count : 0;
-            const fileCount = storageInfo ? storageInfo.file_count : 0;
-
             const option = document.createElement("option");
             option.value = folderName;
-            option.textContent = `📁 ${folderName} (${submissionCount} records, ${fileCount} files)`;
+            option.textContent = `📁 ${folderName}`;
             folderSelect.appendChild(option);
           });
-
-          // Hiển thị thông tin
-          folderInfo.innerHTML = `
-              <strong>📊 Thống kê:</strong><br>
-              • Tổng số thư mục: ${sortedFolders.length}<br>
-              • Database: ${databaseFolders.length} thư mục<br>
-              • Storage: ${storageFolders.length} thư mục<br>
-              • Cập nhật: ${new Date().toLocaleString()}
-            `;
-          folderInfo.style.display = "block";
 
           showMessage("✅ Tải danh sách thư mục thành công!", "success");
         } catch (error) {
@@ -659,64 +511,6 @@
         } finally {
           folderSelect.disabled = false;
         }
-      }
-
-      // Hàm tạo thư mục mới
-      async function createNewFolder() {
-        const folderName = document
-          .getElementById("newFolderName")
-          .value.trim();
-
-        if (!folderName) {
-          showMessage("⚠️ Vui lòng nhập tên thư mục!", "warning");
-          return;
-        }
-
-        if (folderName.length > 50) {
-          showMessage(
-            "⚠️ Tên thư mục không được vượt quá 50 ký tự!",
-            "warning"
-          );
-          return;
-        }
-
-        try {
-          // Tạo một file placeholder trong thư mục mới
-          const placeholderContent = `Thư mục được tạo vào ${new Date().toISOString()}`;
-          const fileName = `${folderName}/.placeholder`;
-
-          const { data, error } = await supabase.storage
-            .from(SUPABASE_BUCKET)
-            .upload(
-              fileName,
-              new Blob([placeholderContent], { type: "text/plain" })
-            );
-
-          if (error) {
-            throw error;
-          }
-
-          showMessage(`✅ Tạo thư mục "${folderName}" thành công!`, "success");
-          hideNewFolderModal();
-
-          // Reload danh sách folders
-          setTimeout(loadFolders, 1000);
-        } catch (error) {
-          console.error("Error creating folder:", error);
-          showMessage(`❌ Lỗi tạo thư mục: ${error.message}`, "error");
-        }
-      }
-
-      // Hàm hiển thị modal tạo thư mục
-      function showNewFolderModal() {
-        document.getElementById("newFolderModal").style.display = "block";
-        document.getElementById("newFolderName").focus();
-      }
-
-      // Hàm ẩn modal tạo thư mục
-      function hideNewFolderModal() {
-        document.getElementById("newFolderModal").style.display = "none";
-        document.getElementById("newFolderName").value = "";
       }
 
       // Hàm hiển thị thông báo
@@ -827,7 +621,7 @@
             e.target.reset();
             document.getElementById("fileSelected").style.display = "none";
 
-            // Reload folders để cập nhật số lượng
+            // Reload folders để cập nhật danh sách
             setTimeout(loadFolders, 1000);
           } catch (error) {
             console.error("Upload error:", error);
@@ -841,24 +635,6 @@
               progressBar.style.display = "none";
               progressFill.style.width = "0%";
             }, 2000);
-          }
-        });
-
-      // Xử lý sự kiện nhấn Enter trong modal
-      document
-        .getElementById("newFolderName")
-        .addEventListener("keypress", function (e) {
-          if (e.key === "Enter") {
-            createNewFolder();
-          }
-        });
-
-      // Xử lý click outside modal để đóng
-      document
-        .getElementById("newFolderModal")
-        .addEventListener("click", function (e) {
-          if (e.target === this) {
-            hideNewFolderModal();
           }
         });
 
