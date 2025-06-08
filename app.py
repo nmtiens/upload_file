@@ -129,22 +129,6 @@ else:
         # Sử dụng mock client
         DEMO_MODE = True
 
-def format_datetime(datetime_str):
-    """Format datetime string to Vietnamese format"""
-    if not datetime_str:
-        return 'N/A'
-    try:
-        # Handle different datetime formats
-        if 'T' in datetime_str:
-            datetime_str = datetime_str.replace('Z', '+00:00')
-            dt = datetime.datetime.fromisoformat(datetime_str)
-        else:
-            dt = datetime.datetime.fromisoformat(datetime_str)
-        return dt.strftime('%d/%m/%Y %H:%M')
-    except Exception as e:
-        print(f"Error formatting datetime {datetime_str}: {e}")
-        return datetime_str
-
 def secure_folder_name(folder_name):
     """
     Chuyển đổi tên thư mục thành format an toàn cho Supabase Storage
@@ -1163,10 +1147,11 @@ def cleanup_empty_folders():
             'success': False,
             'error': f'Lỗi dọn dẹp thư mục: {str(e)}'
         }), 500
+        
 @app.route('/api/submissions', methods=['GET'])
 def get_submissions():
     """
-    API để lấy danh sách submissions từ Supabase
+    API để lấy danh sách submissions với tính năng filter, sort, pagination
     
     Query Parameters:
     - page: Số trang (default: 1)
@@ -1179,18 +1164,10 @@ def get_submissions():
     - date_to: Lọc đến ngày (YYYY-MM-DD)
     - has_file: true/false - Lọc có file hay không
     """
-    
-    # Check if Supabase is available
-    if not supabase:
-        return jsonify({
-            'success': False,
-            'error': 'Supabase connection not available'
-        }), 500
-    
     try:
-        # Get and validate query parameters
-        page = max(1, int(request.args.get('page', 1)))
-        limit = min(max(1, int(request.args.get('limit', 10))), 100)
+        # Lấy query parameters
+        page = int(request.args.get('page', 1))
+        limit = min(int(request.args.get('limit', 10)), 100)  # Max 100 records per page
         sort_by = request.args.get('sort_by', 'upload_time')
         sort_order = request.args.get('sort_order', 'desc').lower()
         folder_filter = request.args.get('folder', '').strip()
@@ -1199,98 +1176,84 @@ def get_submissions():
         date_to = request.args.get('date_to', '').strip()
         has_file_filter = request.args.get('has_file', '').strip().lower()
         
-        # Validate sort parameters
-        allowed_sort_fields = [
-            'upload_time', 'ho_ten', 'ten_de_tai', 'gio_quy_doi', 
-            'folder_name', 'file_size', 'noi_cong_tac', 'khoa_phong'
-        ]
-        if sort_by not in allowed_sort_fields:
-            sort_by = 'upload_time'
-        
+        # Validate parameters
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 10
         if sort_order not in ['asc', 'desc']:
             sort_order = 'desc'
         
-        print(f"📊 Query params - Page: {page}, Limit: {limit}, Sort: {sort_by} {sort_order}")
+        # Allowed sort fields
+        allowed_sort_fields = ['upload_time', 'ho_ten', 'ten_de_tai', 'gio_quy_doi', 'folder_name', 'file_size']
+        if sort_by not in allowed_sort_fields:
+            sort_by = 'upload_time'
         
-        # Start building query
-        query = supabase.table('submissions').select('*')
-        
-        # Apply search filter
-        if search_query:
-            print(f"🔍 Searching for: {search_query}")
-            query = query.or_(
-                f'ho_ten.ilike.%{search_query}%,'
-                f'ten_de_tai.ilike.%{search_query}%,'
-                f'noi_cong_tac.ilike.%{search_query}%,'
-                f'khoa_phong.ilike.%{search_query}%'
-            )
-        
-        # Apply folder filter
-        if folder_filter:
-            print(f"📁 Filtering by folder: {folder_filter}")
-            query = query.ilike('folder_name', f'%{folder_filter}%')
-        
-        # Apply date filters
-        if date_from:
-            try:
-                date_from_dt = datetime.datetime.strptime(date_from, '%Y-%m-%d')
-                date_from_iso = date_from_dt.isoformat()
-                query = query.gte('upload_time', date_from_iso)
-                print(f"📅 Date from: {date_from}")
-            except ValueError:
-                print(f"❌ Invalid date_from format: {date_from}")
-        
-        if date_to:
-            try:
-                date_to_dt = datetime.datetime.strptime(date_to, '%Y-%m-%d')
-                date_to_dt = date_to_dt.replace(hour=23, minute=59, second=59)
-                date_to_iso = date_to_dt.isoformat()
-                query = query.lte('upload_time', date_to_iso)
-                print(f"📅 Date to: {date_to}")
-            except ValueError:
-                print(f"❌ Invalid date_to format: {date_to}")
-        
-        # Apply file filter
-        if has_file_filter == 'true':
-            print("📄 Filtering: has file")
-            query = query.not_.is_('file_name', 'null')
-        elif has_file_filter == 'false':
-            print("📄 Filtering: no file")
-            query = query.is_('file_name', 'null')
-        
-        # Get total count first (for pagination)
-        print("🔢 Getting total count...")
-        count_query = query
-        count_result = count_query.execute()
-        total_records = len(count_result.data)
-        print(f"📊 Total records found: {total_records}")
-        
-        # Apply sorting
-        ascending = (sort_order == 'asc')
-        query = query.order(sort_by, desc=not ascending)
-        
-        # Apply pagination
-        offset = (page - 1) * limit
-        query = query.limit(limit).offset(offset)
-        
-        print(f"📄 Fetching page {page} (offset: {offset}, limit: {limit})")
-        
-        # Execute final query
-        result = query.execute()
-        
-        if not result.data:
-            print("📭 No data returned from query")
+        # Handle demo mode
+        if DEMO_MODE:
+            # Generate demo data
+            demo_submissions = []
+            for i in range(1, 25):  # 24 demo records
+                demo_submissions.append({
+                    'id': i,
+                    'ho_ten': f'Demo User {i}',
+                    'ten_de_tai': f'Demo Project {i}',
+                    'noi_cong_tac': f'Demo Company {i}',
+                    'khoa_phong': f'Demo Department {i}',
+                    'gio_quy_doi': round(i * 1.5, 2),
+                    'minh_chung': f'Demo evidence {i}',
+                    'ghi_chu': f'Demo note {i}',
+                    'file_name': f'demo_file_{i}.pdf' if i % 2 == 0 else None,
+                    'file_url': f'https://demo.example.com/demo_file_{i}.pdf' if i % 2 == 0 else None,
+                    'file_size': i * 1024 if i % 2 == 0 else 0,
+                    'folder_name': f'Demo Folder {(i % 5) + 1}' if i % 3 == 0 else None,
+                    'upload_time': (datetime.datetime.now() - datetime.timedelta(days=i)).isoformat(),
+                    'upload_ip': '127.0.0.1',
+                    'storage_path': f'demo-folder-{(i % 5) + 1}/demo_file_{i}.pdf' if i % 2 == 0 else None
+                })
+            
+            # Apply filters to demo data
+            filtered_submissions = demo_submissions
+            
+            # Apply search filter
+            if search_query:
+                filtered_submissions = [
+                    s for s in filtered_submissions 
+                    if search_query.lower() in s['ho_ten'].lower() or 
+                       search_query.lower() in s['ten_de_tai'].lower()
+                ]
+            
+            # Apply folder filter
+            if folder_filter:
+                filtered_submissions = [
+                    s for s in filtered_submissions 
+                    if s['folder_name'] and folder_filter.lower() in s['folder_name'].lower()
+                ]
+            
+            # Apply has_file filter
+            if has_file_filter == 'true':
+                filtered_submissions = [s for s in filtered_submissions if s['file_name']]
+            elif has_file_filter == 'false':
+                filtered_submissions = [s for s in filtered_submissions if not s['file_name']]
+            
+            # Apply sorting
+            reverse_sort = sort_order == 'desc'
+            filtered_submissions.sort(key=lambda x: x.get(sort_by, ''), reverse=reverse_sort)
+            
+            # Apply pagination
+            offset = (page - 1) * limit
+            paginated_submissions = filtered_submissions[offset:offset + limit]
+            
             return jsonify({
                 'success': True,
-                'data': [],
+                'data': paginated_submissions,
                 'pagination': {
                     'current_page': page,
                     'per_page': limit,
-                    'total_records': 0,
-                    'total_pages': 0,
-                    'has_next': False,
-                    'has_prev': False,
-                    'offset': offset
+                    'total_records': len(filtered_submissions),
+                    'total_pages': math.ceil(len(filtered_submissions) / limit),
+                    'has_next': page < math.ceil(len(filtered_submissions) / limit),
+                    'has_prev': page > 1
                 },
                 'filters': {
                     'folder': folder_filter,
@@ -1300,48 +1263,90 @@ def get_submissions():
                     'has_file': has_file_filter,
                     'sort_by': sort_by,
                     'sort_order': sort_order
-                }
+                },
+                'demo_mode': True
             })
+        
+        # Real Supabase query
+        query = supabase.table('submissions').select('*')
+        
+        # Apply filters
+        if folder_filter:
+            query = query.ilike('folder_name', f'%{folder_filter}%')
+        
+        if search_query:
+            # Search in multiple fields
+            query = query.or_(f'ho_ten.ilike.%{search_query}%,ten_de_tai.ilike.%{search_query}%')
+        
+        if date_from:
+            try:
+                # Convert date format
+                date_from_formatted = datetime.datetime.strptime(date_from, '%Y-%m-%d').isoformat()
+                query = query.gte('upload_time', date_from_formatted)
+            except ValueError:
+                pass  # Invalid date format, ignore
+        
+        if date_to:
+            try:
+                # Convert date format and add end of day
+                date_to_formatted = datetime.datetime.strptime(date_to, '%Y-%m-%d')
+                date_to_formatted = date_to_formatted.replace(hour=23, minute=59, second=59).isoformat()
+                query = query.lte('upload_time', date_to_formatted)
+            except ValueError:
+                pass  # Invalid date format, ignore
+        
+        if has_file_filter == 'true':
+            query = query.not_.is_('file_name', 'null')
+        elif has_file_filter == 'false':
+            query = query.is_('file_name', 'null')
+        
+        # Get total count (before pagination)
+        count_result = query.execute()
+        total_records = len(count_result.data)
+        
+        # Apply sorting and pagination
+        query = query.order(sort_by, desc=(sort_order == 'desc'))
+        
+        # Apply pagination
+        offset = (page - 1) * limit
+        query = query.limit(limit).offset(offset)
+        
+        # Execute query
+        result = query.execute()
         
         # Process results
         submissions = []
         for submission in result.data:
             # Format file size
-            file_size = submission.get('file_size', 0) or 0
-            file_size_human = format_file_size(file_size)
+            file_size = submission.get('file_size', 0)
+            if file_size:
+                file_size_human = format_file_size(file_size)
+            else:
+                file_size_human = '0 B'
             
             # Format upload time
             upload_time = submission.get('upload_time')
-            upload_time_formatted = format_datetime(upload_time)
+            if upload_time:
+                try:
+                    upload_datetime = datetime.datetime.fromisoformat(upload_time.replace('Z', '+00:00'))
+                    upload_time_formatted = upload_datetime.strftime('%d/%m/%Y %H:%M')
+                except:
+                    upload_time_formatted = upload_time
+            else:
+                upload_time_formatted = 'N/A'
             
-            # Process submission data
             processed_submission = {
-                'id': submission.get('id'),
-                'ho_ten': submission.get('ho_ten', ''),
-                'ten_de_tai': submission.get('ten_de_tai', ''),
-                'noi_cong_tac': submission.get('noi_cong_tac', ''),
-                'khoa_phong': submission.get('khoa_phong', ''),
-                'gio_quy_doi': submission.get('gio_quy_doi', 0),
-                'minh_chung': submission.get('minh_chung', ''),
-                'ghi_chu': submission.get('ghi_chu', ''),
-                'file_name': submission.get('file_name'),
-                'file_url': submission.get('file_url'),
-                'file_size': file_size,
+                **submission,
                 'file_size_human': file_size_human,
-                'folder_name': submission.get('folder_name'),
-                'upload_time': upload_time,
                 'upload_time_formatted': upload_time_formatted,
-                'upload_ip': submission.get('upload_ip'),
-                'storage_path': submission.get('storage_path'),
                 'has_file': bool(submission.get('file_name')),
                 'folder_display': submission.get('folder_name') or 'Không có thư mục'
             }
+            
             submissions.append(processed_submission)
         
         # Calculate pagination info
-        total_pages = math.ceil(total_records / limit) if total_records > 0 else 0
-        
-        print(f"✅ Successfully processed {len(submissions)} submissions")
+        total_pages = math.ceil(total_records / limit)
         
         return jsonify({
             'success': True,
@@ -1363,121 +1368,83 @@ def get_submissions():
                 'has_file': has_file_filter,
                 'sort_by': sort_by,
                 'sort_order': sort_order
-            }
+            },
+            'demo_mode': False
         })
         
     except Exception as e:
-        print(f"❌ Error in get_submissions: {str(e)}")
+        print(f"Error in get_submissions: {str(e)}")
         import traceback
         traceback.print_exc()
-        
         return jsonify({
             'success': False,
             'error': f'Lỗi lấy danh sách submissions: {str(e)}'
         }), 500
 
 @app.route('/api/submissions/<int:submission_id>', methods=['GET'])
-def get_submission_by_id(submission_id):
-    """Lấy thông tin chi tiết một submission"""
-    
-    if not supabase:
-        return jsonify({
-            'success': False,
-            'error': 'Supabase connection not available'
-        }), 500
-    
+def get_submission_detail(submission_id):
+    """API để lấy chi tiết một submission"""
     try:
-        print(f"🔍 Getting submission ID: {submission_id}")
+        if DEMO_MODE:
+            # Return demo data
+            return jsonify({
+                'success': True,
+                'data': {
+                    'id': submission_id,
+                    'ho_ten': f'Demo User {submission_id}',
+                    'ten_de_tai': f'Demo Project {submission_id}',
+                    'noi_cong_tac': f'Demo Company {submission_id}',
+                    'khoa_phong': f'Demo Department {submission_id}',
+                    'gio_quy_doi': submission_id * 1.5,
+                    'minh_chung': f'Demo evidence {submission_id}',
+                    'ghi_chu': f'Demo note {submission_id}',
+                    'file_name': f'demo_file_{submission_id}.pdf',
+                    'file_url': f'https://demo.example.com/demo_file_{submission_id}.pdf',
+                    'file_size': submission_id * 1024,
+                    'file_size_human': format_file_size(submission_id * 1024),
+                    'folder_name': f'Demo Folder {submission_id}',
+                    'upload_time': datetime.datetime.now().isoformat(),
+                    'upload_ip': '127.0.0.1',
+                    'storage_path': f'demo-folder-{submission_id}/demo_file_{submission_id}.pdf'
+                },
+                'demo_mode': True
+            })
         
-        result = supabase.table('submissions').select('*').eq('id', submission_id).execute()
+        # Real query
+        result = supabase.table('submissions').select('*').eq('id', submission_id).single().execute()
         
         if not result.data:
             return jsonify({
                 'success': False,
-                'error': 'Submission not found'
+                'error': 'Không tìm thấy submission'
             }), 404
         
-        submission = result.data[0]
+        submission = result.data
         
-        # Format data
-        file_size = submission.get('file_size', 0) or 0
-        processed_submission = {
-            **submission,
-            'file_size_human': format_file_size(file_size),
-            'upload_time_formatted': format_datetime(submission.get('upload_time')),
-            'has_file': bool(submission.get('file_name')),
-            'folder_display': submission.get('folder_name') or 'Không có thư mục'
-        }
+        # Add formatted fields
+        submission['file_size_human'] = format_file_size(submission.get('file_size', 0))
+        submission['has_file'] = bool(submission.get('file_name'))
+        submission['folder_display'] = submission.get('folder_name') or 'Không có thư mục'
         
-        print(f"✅ Found submission: {submission.get('ho_ten')}")
-        
-        return jsonify({
-            'success': True,
-            'data': processed_submission
-        })
-        
-    except Exception as e:
-        print(f"❌ Error getting submission {submission_id}: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': f'Lỗi lấy thông tin submission: {str(e)}'
-        }), 500
-
-@app.route('/api/submissions/stats', methods=['GET'])
-def get_submissions_stats():
-    """Lấy thống kê tổng quan"""
-    
-    if not supabase:
-        return jsonify({
-            'success': False,
-            'error': 'Supabase connection not available'
-        }), 500
-    
-    try:
-        print("📊 Getting submissions statistics...")
-        
-        # Total submissions
-        total_result = supabase.table('submissions').select('*', count='exact').execute()
-        total_submissions = total_result.count
-        
-        # Submissions with files
-        with_files_result = supabase.table('submissions').select('*', count='exact').not_.is_('file_name', 'null').execute()
-        submissions_with_files = with_files_result.count
-        
-        # Submissions without files
-        submissions_without_files = total_submissions - submissions_with_files
-        
-        # Total file size
-        files_result = supabase.table('submissions').select('file_size').not_.is_('file_name', 'null').execute()
-        total_file_size = sum(row.get('file_size', 0) or 0 for row in files_result.data)
-        
-        # Recent submissions (last 7 days)
-        seven_days_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).isoformat()
-        recent_result = supabase.table('submissions').select('*', count='exact').gte('upload_time', seven_days_ago).execute()
-        recent_submissions = recent_result.count
-        
-        stats = {
-            'total_submissions': total_submissions,
-            'submissions_with_files': submissions_with_files,
-            'submissions_without_files': submissions_without_files,
-            'total_file_size': total_file_size,
-            'total_file_size_human': format_file_size(total_file_size),
-            'recent_submissions_7days': recent_submissions,
-            'file_percentage': round((submissions_with_files / total_submissions * 100), 2) if total_submissions > 0 else 0
-        }
-        
-        print(f"✅ Stats calculated: {stats}")
+        # Format upload time
+        upload_time = submission.get('upload_time')
+        if upload_time:
+            try:
+                upload_datetime = datetime.datetime.fromisoformat(upload_time.replace('Z', '+00:00'))
+                submission['upload_time_formatted'] = upload_datetime.strftime('%d/%m/%Y %H:%M:%S')
+            except:
+                submission['upload_time_formatted'] = upload_time
         
         return jsonify({
             'success': True,
-            'data': stats
+            'data': submission
         })
         
     except Exception as e:
-        print(f"❌ Error getting stats: {str(e)}")
+        print(f"Error in get_submission_detail: {str(e)}")
         return jsonify({
             'success': False,
-            'error': f'Lỗi lấy thống kê: {str(e)}'
+            'error': f'Lỗi lấy chi tiết submission: {str(e)}'
         }), 500
 
 @app.route('/api/submissions/<int:submission_id>', methods=['PUT'])
