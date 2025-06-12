@@ -378,7 +378,7 @@
                 type="file"
                 id="file"
                 name="file"
-                accept=".txt,.pdf,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx"
+                accept=".txt,.pdf,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx,.ppt,.pptx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 required
               />
               <label for="file" class="file-input-label">
@@ -532,14 +532,69 @@
         const file = e.target.files[0];
 
         if (file) {
+          // Kiểm tra kích thước file (giới hạn 50MB)
+          const maxSize = 50 * 1024 * 1024; // 50MB
+          if (file.size > maxSize) {
+            showMessage(
+              "❌ File quá lớn! Vui lòng chọn file nhỏ hơn 50MB",
+              "error"
+            );
+            e.target.value = "";
+            fileSelected.style.display = "none";
+            return;
+          }
+
+          // Kiểm tra định dạng file
+          const allowedTypes = [
+            "text/plain",
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+            "image/jpg",
+            "image/gif",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          ];
+
+          const fileExtension = file.name.split(".").pop().toLowerCase();
+          const allowedExtensions = [
+            "txt",
+            "pdf",
+            "png",
+            "jpg",
+            "jpeg",
+            "gif",
+            "doc",
+            "docx",
+            "xls",
+            "xlsx",
+            "ppt",
+            "pptx",
+          ];
+
+          if (
+            !allowedTypes.includes(file.type) &&
+            !allowedExtensions.includes(fileExtension)
+          ) {
+            showMessage("❌ Định dạng file không được hỗ trợ!", "error");
+            e.target.value = "";
+            fileSelected.style.display = "none";
+            return;
+          }
+
           const fileSize = (file.size / 1024 / 1024).toFixed(2);
           fileSelected.innerHTML = `
               <strong>📎 File đã chọn:</strong><br>
               • Tên: ${file.name}<br>
               • Kích thước: ${fileSize} MB<br>
-              • Loại: ${file.type || "Không xác định"}
+              • Loại: ${file.type || fileExtension.toUpperCase()}
             `;
           fileSelected.style.display = "block";
+          showMessage("✅ File đã được chọn thành công!", "success");
         } else {
           fileSelected.style.display = "none";
         }
@@ -569,53 +624,95 @@
             const file = formData.get("file");
             const folderName = formData.get("folder");
 
-            if (!file || !folderName) {
-              throw new Error("Vui lòng chọn file và thư mục!");
+            // Validation chi tiết
+            if (!file || file.size === 0) {
+              throw new Error("Vui lòng chọn file để upload!");
+            }
+
+            if (!folderName || folderName.trim() === "") {
+              throw new Error("Vui lòng chọn thư mục!");
+            }
+
+            // Kiểm tra các trường bắt buộc
+            const requiredFields = ["ho_ten", "khoa_phong", "ten_de_tai"];
+            for (let field of requiredFields) {
+              const value = formData.get(field);
+              if (!value || value.trim() === "") {
+                throw new Error(`Vui lòng điền ${field.replace("_", " ")}!`);
+              }
             }
 
             progressFill.style.width = "30%";
 
-            // Upload file lên Supabase Storage
-            const fileName = `${folderName}/${Date.now()}_${file.name}`;
+            // Tạo tên file unique để tránh trùng lặp
+            const timestamp = new Date().getTime();
+            const randomStr = Math.random().toString(36).substring(2, 8);
+            const fileExtension = file.name.split(".").pop();
+            const baseName = file.name.replace(/\.[^/.]+$/, ""); // Tên file không có extension
+            const uniqueFileName = `${baseName}_${timestamp}_${randomStr}.${fileExtension}`;
+            const fullFilePath = `${folderName}/${uniqueFileName}`;
+
+            console.log("Uploading file:", {
+              originalName: file.name,
+              uniqueName: uniqueFileName,
+              fullPath: fullFilePath,
+              size: file.size,
+              type: file.type,
+            });
+
+            // Upload file lên Supabase Storage với options cụ thể
             const { data: uploadData, error: uploadError } =
               await supabase.storage
                 .from(SUPABASE_BUCKET)
-                .upload(fileName, file);
+                .upload(fullFilePath, file, {
+                  cacheControl: "3600",
+                  upsert: false, // Không ghi đè file cũ
+                  contentType: file.type || "application/octet-stream",
+                });
 
             if (uploadError) {
-              throw uploadError;
+              console.error("Upload error details:", uploadError);
+              throw new Error(`Lỗi upload file: ${uploadError.message}`);
             }
 
+            console.log("Upload successful:", uploadData);
             progressFill.style.width = "70%";
 
             // Lưu thông tin vào database
             const submissionData = {
-              ho_ten: formData.get("ho_ten"),
-              khoa_phong: formData.get("khoa_phong"),
-              noi_cong_tac: formData.get("noi_cong_tac"),
-              ten_de_tai: formData.get("ten_de_tai"),
+              ho_ten: formData.get("ho_ten").trim(),
+              khoa_phong: formData.get("khoa_phong").trim(),
+              noi_cong_tac: formData.get("noi_cong_tac")?.trim() || null,
+              ten_de_tai: formData.get("ten_de_tai").trim(),
               gio_quy_doi: parseFloat(formData.get("gio_quy_doi")) || 0,
-              minh_chung: formData.get("minh_chung"),
-              ghi_chu: formData.get("ghi_chu"),
-              folder_name: folderName,
+              minh_chung: formData.get("minh_chung")?.trim() || null,
+              ghi_chu: formData.get("ghi_chu")?.trim() || null,
+              folder_name: folderName.trim(),
               file_name: file.name,
-              file_path: fileName,
+              file_path: fullFilePath,
               file_size: file.size,
-              file_type: file.type,
+              file_type: file.type || fileExtension,
               created_at: new Date().toISOString(),
             };
 
             const { data: dbData, error: dbError } = await supabase
               .from("submissions")
-              .insert([submissionData]);
+              .insert([submissionData])
+              .select();
 
             if (dbError) {
-              throw dbError;
+              console.error("Database error:", dbError);
+              // Nếu lưu DB thất bại, xóa file đã upload
+              await supabase.storage
+                .from(SUPABASE_BUCKET)
+                .remove([fullFilePath]);
+              throw new Error(`Lỗi lưu thông tin: ${dbError.message}`);
             }
 
             progressFill.style.width = "100%";
+            console.log("Database save successful:", dbData);
 
-            showMessage("🎉 Upload thành công!", "success");
+            showMessage("🎉 Upload và lưu thông tin thành công!", "success");
 
             // Reset form
             e.target.reset();
@@ -624,8 +721,8 @@
             // Reload folders để cập nhật danh sách
             setTimeout(loadFolders, 1000);
           } catch (error) {
-            console.error("Upload error:", error);
-            showMessage(`❌ Lỗi upload: ${error.message}`, "error");
+            console.error("Upload process error:", error);
+            showMessage(`❌ ${error.message}`, "error");
           } finally {
             // Reset UI
             submitBtn.disabled = false;
@@ -639,20 +736,20 @@
         });
 
       // Load folders khi trang được tải
-      document.addEventListener("DOMContentLoaded", function () {
-        console.log("Page loaded, initializing Supabase connection...");
+      document.addEventListener("DOMContentLoaded", async function () {
+        console.log("Page loaded, initializing...");
 
         // Kiểm tra cấu hình
         if (SUPABASE_URL.includes("YOUR_SUPABASE_URL")) {
           showMessage(
             "⚠️ Vui lòng cấu hình Supabase URL và API Key trong code",
-            "warning"
+            "error"
           );
           return;
         }
 
         // Auto load folders
-        loadFolders();
+        await loadFolders();
       });
 
       // Auto refresh folders mỗi 5 phút
