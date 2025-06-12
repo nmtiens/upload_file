@@ -1,25 +1,35 @@
-from email import charset
-import mimetypes
+# Thêm các import cần thiết ở đầu file
+import hashlib
+import json
+import logging
 import re
-from flask import Flask, request, render_template, jsonify, send_file
+from flask import Flask, request, render_template, jsonify, send_file, abort
 import os
 from urllib.parse import unquote
-import datetime
+from datetime import datetime
+# Sử dụng: datetime.now()
 from werkzeug.utils import secure_filename
 import math
 from pathlib import Path
 import platform
 import io
 import uuid
-from supabase import create_client, Client
-import tempfile
+from supabase import create_client, Client  
+import zipfile
+import shutil
+from pathlib import Path
+
+from utils import format_file_size, secure_folder_name
+# Cấu hình logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-
 # Cấu hình Supabase với giá trị mặc định và kiểm tra tốt hơn
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 SUPABASE_BUCKET = os.environ.get('SUPABASE_BUCKET', 'file-uploads')
+
 
 # Kiểm tra và hướng dẫn cấu hình
 if not SUPABASE_URL or not SUPABASE_KEY:
@@ -128,78 +138,10 @@ else:
         print("🔄 Chuyển sang chế độ DEMO")
         # Sử dụng mock client
         DEMO_MODE = True
+# Cache để tránh gọi API nhiều lần
 
-def secure_folder_name(folder_name):
-    """
-    Chuyển đổi tên thư mục thành format an toàn cho Supabase Storage
-    """
-    if not folder_name or not isinstance(folder_name, str):
-        return None
-    
-    # Bước 1: Loại bỏ khoảng trắng đầu/cuối
-    folder_name = folder_name.strip()
-    
-    if not folder_name:
-        return None
-    
-    # Bước 2: Chuyển đổi tiếng Việt có dấu thành không dấu
-    vietnamese_map = {
-        'à': 'a', 'á': 'a', 'ả': 'a', 'ã': 'a', 'ạ': 'a',
-        'ă': 'a', 'ằ': 'a', 'ắ': 'a', 'ẳ': 'a', 'ẵ': 'a', 'ặ': 'a',
-        'â': 'a', 'ầ': 'a', 'ấ': 'a', 'ẩ': 'a', 'ẫ': 'a', 'ậ': 'a',
-        'è': 'e', 'é': 'e', 'ẻ': 'e', 'ẽ': 'e', 'ẹ': 'e',
-        'ê': 'e', 'ề': 'e', 'ế': 'e', 'ể': 'e', 'ễ': 'e', 'ệ': 'e',
-        'ì': 'i', 'í': 'i', 'ỉ': 'i', 'ĩ': 'i', 'ị': 'i',
-        'ò': 'o', 'ó': 'o', 'ỏ': 'o', 'õ': 'o', 'ọ': 'o',
-        'ô': 'o', 'ồ': 'o', 'ố': 'o', 'ổ': 'o', 'ỗ': 'o', 'ộ': 'o',
-        'ơ': 'o', 'ờ': 'o', 'ớ': 'o', 'ở': 'o', 'ỡ': 'o', 'ợ': 'o',
-        'ù': 'u', 'ú': 'u', 'ủ': 'u', 'ũ': 'u', 'ụ': 'u',
-        'ư': 'u', 'ừ': 'u', 'ứ': 'u', 'ử': 'u', 'ữ': 'u', 'ự': 'u',
-        'ỳ': 'y', 'ý': 'y', 'ỷ': 'y', 'ỹ': 'y', 'ỵ': 'y',
-        'đ': 'd',
-        # Viết hoa
-        'À': 'A', 'Á': 'A', 'Ả': 'A', 'Ã': 'A', 'Ạ': 'A',
-        'Ă': 'A', 'Ằ': 'A', 'Ắ': 'A', 'Ẳ': 'A', 'Ẵ': 'A', 'Ặ': 'A',
-        'Â': 'A', 'Ầ': 'A', 'Ấ': 'A', 'Ẩ': 'A', 'Ẫ': 'A', 'Ậ': 'A',
-        'È': 'E', 'É': 'E', 'Ẻ': 'E', 'Ẽ': 'E', 'Ẹ': 'E',
-        'Ê': 'E', 'Ề': 'E', 'Ế': 'E', 'Ể': 'E', 'Ễ': 'E', 'Ệ': 'E',
-        'Ì': 'I', 'Í': 'I', 'Ỉ': 'I', 'Ĩ': 'I', 'Ị': 'I',
-        'Ò': 'O', 'Ó': 'O', 'Ỏ': 'O', 'Õ': 'O', 'Ọ': 'O',
-        'Ô': 'O', 'Ồ': 'O', 'Ố': 'O', 'Ổ': 'O', 'Ỗ': 'O', 'Ộ': 'O',
-        'Ơ': 'O', 'Ờ': 'O', 'Ớ': 'O', 'Ở': 'O', 'Ỡ': 'O', 'Ợ': 'O',
-        'Ù': 'U', 'Ú': 'U', 'Ủ': 'U', 'Ũ': 'U', 'Ụ': 'U',
-        'Ư': 'U', 'Ừ': 'U', 'Ứ': 'U', 'Ử': 'U', 'Ữ': 'U', 'Ự': 'U',
-        'Ỳ': 'Y', 'Ý': 'Y', 'Ỷ': 'Y', 'Ỹ': 'Y', 'Ỵ': 'Y',
-        'Đ': 'D'
-    }
-    
-    # Thay thế ký tự tiếng Việt
-    result = ''
-    for char in folder_name:
-        if char in vietnamese_map:
-            result += vietnamese_map[char]
-        else:
-            result += char
-    
-    # Bước 3: Thay thế khoảng trắng và ký tự đặc biệt bằng dấu gạch ngang
-    result = re.sub(r'[\s\-]+', '-', result)  # Khoảng trắng và dấu gạch ngang
-    result = re.sub(r'[^\w\-]', '', result)   # Loại bỏ ký tự đặc biệt khác
-    
-    # Bước 4: Loại bỏ dấu gạch ngang ở đầu và cuối
-    result = result.strip('-')
-    
-    # Bước 5: Giới hạn độ dài (tùy chọn)
-    if len(result) > 50:
-        result = result[:50].rstrip('-')
-    
-    # Bước 6: Kiểm tra kết quả cuối cùng
-    if not result or result.isspace():
-        return None
-    
-    return result
-
-# Cấu hình app
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+# Cấu hình app - TỪ 16MB lên 100MB để hỗ trợ file Word lớn
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
 
 # In thông tin khởi động
 print(f"=== FILE UPLOAD SERVER ===")
@@ -247,31 +189,82 @@ def init_db():
 
 init_db()
 
-ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'doc', 'docx', 'xls', 'xlsx', 'zip', 'rar', '7z'}
+# Mở rộng ALLOWED_EXTENSIONS để hỗ trợ đầy đủ các format Word và Office
+ALLOWED_EXTENSIONS = {
+    'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg',
+    'doc', 'docx', 'docm', 'dot', 'dotx', 'dotm',  # Word files
+    'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'xltm',  # Excel files
+    'ppt', 'pptx', 'pptm', 'pot', 'potx', 'potm',  # PowerPoint files
+    'zip', 'rar', '7z', 'tar', 'gz',  # Archive files
+    'mp3', 'mp4', 'avi', 'mov', 'wmv',  # Media files
+    'csv', 'json', 'xml'  # Data files
+}
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    """Kiểm tra file có được phép upload không"""
+    if not filename or '.' not in filename:
+        return False
+    
+    extension = filename.rsplit('.', 1)[1].lower()
+    is_allowed = extension in ALLOWED_EXTENSIONS
+    
+    # Log để debug
+    logger.info(f"Checking file: {filename}, extension: {extension}, allowed: {is_allowed}")
+    
+    return is_allowed
 
-def format_file_size(size_bytes):
-    """Chuyển đổi byte sang định dạng dễ đọc"""
-    if size_bytes is None:
-        return "0 B"
+def get_content_type(filename):
+    """Xác định content-type cho file"""
+    if not filename:
+        return "application/octet-stream"
     
-    try:
-        if isinstance(size_bytes, str):
-            size_bytes = int(size_bytes) if size_bytes.isdigit() else 0
-        size_bytes = int(size_bytes)
-    except (ValueError, TypeError):
-        return "0 B"
+    extension = filename.rsplit('.', 1)[1].lower() if '.' in filename else ""
     
-    if size_bytes == 0:
-        return "0 B"
+    content_types = {
+        # Microsoft Office
+        'doc': 'application/msword',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'docm': 'application/vnd.ms-word.document.macroEnabled.12',
+        'dot': 'application/msword',
+        'dotx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
+        'dotm': 'application/vnd.ms-word.template.macroEnabled.12',
+        
+        'xls': 'application/vnd.ms-excel',
+        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
+        
+        'ppt': 'application/vnd.ms-powerpoint',
+        'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'pptm': 'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
+        
+        # Other common types
+        'pdf': 'application/pdf',
+        'txt': 'text/plain',
+        'csv': 'text/csv',
+        'json': 'application/json',
+        'xml': 'application/xml',
+        
+        # Images
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'bmp': 'image/bmp',
+        'svg': 'image/svg+xml',
+        
+        # Archives
+        'zip': 'application/zip',
+        'rar': 'application/x-rar-compressed',
+        '7z': 'application/x-7z-compressed',
+        
+        # Media
+        'mp3': 'audio/mpeg',
+        'mp4': 'video/mp4',
+        'avi': 'video/x-msvideo',
+        'mov': 'video/quicktime',
+    }
     
-    size_names = ["B", "KB", "MB", "GB", "TB"]
-    i = int(math.floor(math.log(size_bytes, 1024)))
-    p = math.pow(1024, i)
-    s = round(size_bytes / p, 2)
-    return f"{s} {size_names[i]}"
+    return content_types.get(extension, "application/octet-stream")
 
 def get_client_ip():
     """Lấy IP client"""
@@ -284,7 +277,7 @@ def upload_to_supabase(file, folder_name=None):
     """Upload file lên Supabase Storage"""
     if DEMO_MODE:
         # Mô phỏng upload thành công
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         unique_id = str(uuid.uuid4())[:8]
         original_name = secure_filename(file.filename)
         name, ext = os.path.splitext(original_name)
@@ -305,7 +298,7 @@ def upload_to_supabase(file, folder_name=None):
     
     try:
         # Tạo tên file unique
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         unique_id = str(uuid.uuid4())[:8]
         original_name = secure_filename(file.filename)
         name, ext = os.path.splitext(original_name)
@@ -317,22 +310,42 @@ def upload_to_supabase(file, folder_name=None):
         else:
             storage_path = file_name
         
+        # QUAN TRỌNG: Reset file pointer về đầu trước khi đọc
+        file.seek(0)
+        
         # Đọc file content
         file_content = file.read()
         file_size = len(file_content)
+        
+        # Xác định content-type chính xác
+        content_type = get_content_type(original_name)
+        
+        logger.info(f"Uploading file: {file_name}, size: {file_size}, content-type: {content_type}")
         
         # Upload lên Supabase Storage
         result = supabase.storage.from_(SUPABASE_BUCKET).upload(
             path=storage_path,
             file=file_content,
             file_options={
-                "content-type": file.content_type or "application/octet-stream"
+                "content-type": content_type,
+                "cache-control": "3600",
+                "upsert": "false"  # Không ghi đè file cùng tên
             }
         )
         
-        if result.status_code == 200:
+        # Kiểm tra kết quả upload
+        if hasattr(result, 'status_code'):
+            status_code = result.status_code
+        elif hasattr(result, 'data') and result.data:
+            status_code = 200  # Thành công
+        else:
+            status_code = 400  # Lỗi
+        
+        if status_code == 200 or (hasattr(result, 'data') and result.data):
             # Lấy public URL
             public_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(storage_path)
+            
+            logger.info(f"Upload successful: {storage_path}")
             
             return {
                 'success': True,
@@ -342,12 +355,18 @@ def upload_to_supabase(file, folder_name=None):
                 'file_size': file_size
             }
         else:
+            error_msg = f"Upload failed with status: {status_code}"
+            if hasattr(result, 'error') and result.error:
+                error_msg += f" - {result.error}"
+            
+            logger.error(error_msg)
             return {
                 'success': False,
-                'error': f"Upload failed: {result.status_code}"
+                'error': error_msg
             }
             
     except Exception as e:
+        logger.error(f"Upload exception: {str(e)}")
         return {
             'success': False,
             'error': str(e)
@@ -414,7 +433,13 @@ def upload_file():
         # Xử lý file upload
         if 'file' in request.files:
             file = request.files['file']
-            if file and hasattr(file, 'filename') and file.filename and file.filename.strip():
+            
+            # Kiểm tra file có tồn tại và có tên không
+            if not file or not file.filename or not file.filename.strip():
+                logger.info("No file selected for upload")
+            else:
+                logger.info(f"Processing file: {file.filename}")
+                
                 if allowed_file(file.filename):
                     # Upload lên Supabase (hoặc mô phỏng)
                     upload_result = upload_to_supabase(file, final_folder_name)
@@ -426,11 +451,13 @@ def upload_file():
                         storage_path = upload_result['storage_path']
                         
                         status_text = "Demo upload" if DEMO_MODE else "Uploaded to Supabase"
-                        print(f"{status_text}: {storage_path} ({format_file_size(file_size)}) from IP: {client_ip}")
+                        logger.info(f"{status_text}: {storage_path} ({format_file_size(file_size)}) from IP: {client_ip}")
                     else:
+                        logger.error(f"Upload failed: {upload_result['error']}")
                         return jsonify({'error': f'Lỗi upload: {upload_result["error"]}'}), 500
                 else:
-                    return jsonify({'error': 'Loại file không được hỗ trợ'}), 400
+                    logger.warning(f"File type not allowed: {file.filename}")
+                    return jsonify({'error': f'Loại file không được hỗ trợ. Các định dạng được hỗ trợ: {", ".join(sorted(ALLOWED_EXTENSIONS))}'}), 400
 
         # Lưu vào database (hoặc mô phỏng)
         try:
@@ -446,19 +473,19 @@ def upload_file():
                 'file_url': file_url,
                 'file_size': file_size,
                 'folder_name': final_folder_name,
-                'upload_time': datetime.datetime.now().isoformat(),
+                'upload_time': datetime.now().isoformat(),
                 'upload_ip': client_ip,
                 'storage_path': storage_path
             }
             
             if not DEMO_MODE:
                 result = supabase.table('submissions').insert(submission_data).execute()
-                print(f"Data saved to Supabase database: {result}")
+                logger.info(f"Data saved to Supabase database")
             else:
-                print(f"Demo mode - would save: {submission_data}")
+                logger.info(f"Demo mode - would save: {submission_data}")
             
         except Exception as e:
-            print(f"Database error: {str(e)}")
+            logger.error(f"Database error: {str(e)}")
             if not DEMO_MODE:
                 return jsonify({'error': f'Lỗi lưu database: {str(e)}'}), 500
 
@@ -479,7 +506,7 @@ def upload_file():
             'file_name': file_name,
             'file_url': file_url,
             'file_size': file_size,
-            'file_size_human': format_file_size(file_size),
+            'file_size_human': format_file_size(file_size) if file_size else "0 B",
             'folder': final_folder_name,
             'storage_path': storage_path,
             'client_ip': client_ip,
@@ -487,683 +514,1350 @@ def upload_file():
         })
 
     except Exception as e:
-        print(f"Upload error: {str(e)}")
+        logger.error(f"Upload error: {str(e)}")
         return jsonify({'error': f'Lỗi: {str(e)}'}), 500
-
-@app.route('/submissions')
-def list_submissions():
-    """API để lấy danh sách submissions"""
-    if DEMO_MODE:
-        return jsonify({
-            'submissions': [
-                {
-                    'id': 1,
-                    'ho_ten': 'Demo User',
-                    'ten_de_tai': 'Demo Project',
-                    'upload_time': datetime.datetime.now().isoformat(),
-                    'file_name': 'demo_file.pdf',
-                    'file_size': 1024
-                }
-            ],
-            'count': 1,
-            'demo_mode': True
-        })
     
-    try:
-        result = supabase.table('submissions').select('*').order('upload_time', desc=True).execute()
-        return jsonify({
-            'submissions': result.data,
-            'count': len(result.data)
-        })
-    except Exception as e:
-        return jsonify({'error': f'Lỗi lấy dữ liệu: {str(e)}'}), 500
-
-@app.route('/download/<int:submission_id>')
-def download_file(submission_id):
-    """Download file từ Supabase Storage"""
-    if DEMO_MODE:
-        # Tạo file demo để download
-        demo_content = f"Demo file content for submission {submission_id}\nGenerated at: {datetime.datetime.now()}"
-        return send_file(
-            io.BytesIO(demo_content.encode()),
-            as_attachment=True,
-            download_name=f"demo_file_{submission_id}.txt",
-            mimetype='text/plain'
-        )
+def get_all_storage_files(supabase, bucket_name, path="", max_files=5000):
+    """
+    Lấy tất cả files trong storage một cách recursive
+    """
+    all_files = []
+    folders_to_process = [path] if path else [""]
+    processed_folders = set()
     
-    try:
-        # Lấy thông tin file từ database
-        result = supabase.table('submissions').select('*').eq('id', submission_id).single().execute()
+    while folders_to_process:
+        current_path = folders_to_process.pop(0)
         
-        if not result.data:
-            return jsonify({'error': 'Không tìm thấy file'}), 404
+        # Tránh xử lý folder trùng lặp
+        if current_path in processed_folders:
+            continue
+        processed_folders.add(current_path)
         
-        submission = result.data
-        storage_path = submission.get('storage_path')
-        file_name = submission.get('file_name')
-        
-        if not storage_path:
-            return jsonify({'error': 'File không có trên storage'}), 404
-        
-        # Download file từ Supabase Storage
-        file_response = supabase.storage.from_(SUPABASE_BUCKET).download(storage_path)
-        
-        if file_response:
-            # Trả về file
-            return send_file(
-                io.BytesIO(file_response),
-                as_attachment=True,
-                download_name=file_name,
-                mimetype='application/octet-stream'
+        try:
+            # Lấy items trong folder hiện tại
+            items = supabase.storage.from_(bucket_name).list(
+                path=current_path, 
+                options={"limit": 1000}
             )
-        else:
-            return jsonify({'error': 'Không thể download file'}), 500
             
-    except Exception as e:
-        return jsonify({'error': f'Lỗi download: {str(e)}'}), 500
-
-# Các API khác có thể được thêm tương tự với kiểm tra DEMO_MODE
-
-# Thêm các API này vào file Flask server của bạn
-
-@app.route('/api/folders', methods=['GET'])
-def get_all_folders():
-    """API để lấy danh sách tất cả folders từ cả Database và Storage"""
-    try:
-        folders_data = {
-            'database_folders': [],
-            'storage_folders': [],
-            'combined_folders': []
-        }
-        
-        # 1. Lấy folders từ Database (từ submissions)
-        try:
-            db_result = supabase.table('submissions').select('folder_name').execute()
-            
-            # Kiểm tra kết quả database
-            print(f"Database result: {db_result}")
-            
-            # Đếm số lượng submissions theo folder
-            folder_counts = {}
-            if db_result.data:
-                for item in db_result.data:
-                    folder_name = item.get('folder_name')
-                    if folder_name and folder_name.strip():
-                        folder_name = folder_name.strip()
-                        folder_counts[folder_name] = folder_counts.get(folder_name, 0) + 1
-            
-            # Format database folders
-            for folder_name, count in folder_counts.items():
-                folders_data['database_folders'].append({
-                    'name': folder_name,
-                    'source': 'database',
-                    'submission_count': count
-                })
+            if not items:
+                continue
                 
-        except Exception as db_error:
-            print(f"Error getting folders from database: {str(db_error)}")
-        
-        # 2. Lấy folders từ Storage
-        try:
-            # Thử nhiều cách để lấy dữ liệu từ storage
-            print(f"Trying to access bucket: {SUPABASE_BUCKET}")
-            
-            # Cách 1: List tất cả files
-            storage_result = supabase.storage.from_(SUPABASE_BUCKET).list()
-            print(f"Storage result: {storage_result}")
-            
-            if storage_result:
-                storage_folders = {}
-                
-                for file_item in storage_result:
-                    print(f"Processing file item: {file_item}")
-                    
-                    file_name = file_item.get('name', '')
-                    
-                    # Kiểm tra nếu là folder (không có extension hoặc có dấu /)
-                    if '/' in file_name:
-                        # File trong subfolder
-                        folder_name = file_name.split('/')[0]
-                    elif '.' not in file_name:
-                        # Có thể là folder
-                        folder_name = file_name
-                    else:
-                        # File ở root level
-                        continue
-                    
-                    if folder_name and folder_name.strip():
-                        folder_name = folder_name.strip()
-                        
-                        if folder_name not in storage_folders:
-                            storage_folders[folder_name] = {
-                                'name': folder_name,
-                                'source': 'storage',
-                                'file_count': 0,
-                                'total_size': 0,
-                                'last_modified': None
-                            }
-                        
-                        # Chỉ đếm nếu là file thực sự (có extension)
-                        if '/' in file_name or '.' in file_name:
-                            file_size = 0
-                            if 'metadata' in file_item and file_item['metadata']:
-                                file_size = file_item['metadata'].get('size', 0) or 0
-                            
-                            storage_folders[folder_name]['file_count'] += 1
-                            storage_folders[folder_name]['total_size'] += file_size
-                            
-                            # Cập nhật thời gian sửa đổi cuối
-                            file_updated = file_item.get('updated_at')
-                            if file_updated and (not storage_folders[folder_name]['last_modified'] or 
-                                               file_updated > storage_folders[folder_name]['last_modified']):
-                                storage_folders[folder_name]['last_modified'] = file_updated
-                
-                folders_data['storage_folders'] = list(storage_folders.values())
-                
-            # Cách 2: Nếu cách 1 không work, thử list với recursive
-            if not folders_data['storage_folders']:
-                try:
-                    # Thử list với options khác
-                    storage_result_alt = supabase.storage.from_(SUPABASE_BUCKET).list(path="", options={"limit": 1000})
-                    print(f"Alternative storage result: {storage_result_alt}")
-                    
-                    if storage_result_alt:
-                        for item in storage_result_alt:
-                            folder_name = item.get('name', '').strip()
-                            if folder_name and folder_name not in [f['name'] for f in folders_data['storage_folders']]:
-                                folders_data['storage_folders'].append({
-                                    'name': folder_name,
-                                    'source': 'storage',
-                                    'file_count': 0,
-                                    'total_size': 0,
-                                    'last_modified': item.get('updated_at')
-                                })
-                except Exception as alt_error:
-                    print(f"Alternative storage method failed: {str(alt_error)}")
-                    
-        except Exception as storage_error:
-            print(f"Error getting folders from storage: {str(storage_error)}")
-        
-        # 3. Kết hợp và loại bỏ trùng lặp
-        all_folder_names = set()
-        
-        # Thêm từ database
-        for folder in folders_data['database_folders']:
-            all_folder_names.add(folder['name'])
-        
-        # Thêm từ storage
-        for folder in folders_data['storage_folders']:
-            all_folder_names.add(folder['name'])
-        
-        # Tạo danh sách kết hợp
-        for folder_name in sorted(all_folder_names):
-            # Tìm thông tin từ database
-            db_info = next((f for f in folders_data['database_folders'] if f['name'] == folder_name), None)
-            
-            # Tìm thông tin từ storage
-            storage_info = next((f for f in folders_data['storage_folders'] if f['name'] == folder_name), None)
-            
-            combined_folder = {
-                'name': folder_name,
-                'exists_in_database': db_info is not None,
-                'exists_in_storage': storage_info is not None,
-                'submission_count': db_info['submission_count'] if db_info else 0,
-                'file_count': storage_info['file_count'] if storage_info else 0,
-                'total_size': storage_info['total_size'] if storage_info else 0,
-                'total_size_human': format_file_size(storage_info['total_size']) if storage_info else '0 B',
-                'last_modified': storage_info['last_modified'] if storage_info else None,
-                'status': 'active' if (db_info and storage_info) else 'partial'
-            }
-            
-            folders_data['combined_folders'].append(combined_folder)
-        
-        # Debug output
-        print(f"Final result - Database folders: {len(folders_data['database_folders'])}")
-        print(f"Final result - Storage folders: {len(folders_data['storage_folders'])}")
-        print(f"Final result - Combined folders: {len(folders_data['combined_folders'])}")
-        
-        return jsonify({
-            'success': True,
-            'data': folders_data,
-            'summary': {
-                'total_folders': len(folders_data['combined_folders']),
-                'database_only': len([f for f in folders_data['combined_folders'] if f['exists_in_database'] and not f['exists_in_storage']]),
-                'storage_only': len([f for f in folders_data['combined_folders'] if f['exists_in_storage'] and not f['exists_in_database']]),
-                'both_sources': len([f for f in folders_data['combined_folders'] if f['exists_in_database'] and f['exists_in_storage']])
-            },
-            'message': f'Tìm thấy {len(folders_data["combined_folders"])} folder'
-        })
-        
-    except Exception as e:
-        print(f"Error in get_all_folders: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': f'Lỗi lấy danh sách folder: {str(e)}'
-        }), 500
-
-@app.route('/api/folders/simple', methods=['GET'])
-def get_folders_simple():
-    """API đơn giản để lấy danh sách tên folder (cho dropdown)"""
-    try:
-        folder_names = set()
-        
-        # Lấy từ database
-        try:
-            result = supabase.table('submissions').select('folder_name').execute()
-            print(f"Database folders result: {result}")
-            
-            if result.data:
-                for item in result.data:
-                    folder_name = item.get('folder_name')
-                    if folder_name and folder_name.strip():
-                        folder_names.add(folder_name.strip())
-        except Exception as db_error:
-            print(f"Database error in simple folders: {str(db_error)}")
-        
-        # Lấy từ storage
-        try:
-            storage_result = supabase.storage.from_(SUPABASE_BUCKET).list()
-            print(f"Storage folders result: {storage_result}")
-            
-            if storage_result:
-                for item in storage_result:
-                    folder_name = item.get('name', '').strip()
-                    if folder_name:
-                        # Nếu có dấu /, lấy phần đầu
-                        if '/' in folder_name:
-                            folder_name = folder_name.split('/')[0]
-                        # Nếu không có extension, có thể là folder
-                        if '.' not in folder_name:
-                            folder_names.add(folder_name)
-        except Exception as storage_error:
-            print(f"Storage error in simple folders: {str(storage_error)}")
-        
-        # Sắp xếp theo alphabet
-        sorted_folders = sorted(list(folder_names))
-        
-        print(f"Final folders list: {sorted_folders}")
-        
-        return jsonify({
-            'success': True,
-            'folders': sorted_folders,
-            'count': len(sorted_folders)
-        })
-        
-    except Exception as e:
-        print(f"Error in get_folders_simple: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': f'Lỗi lấy danh sách folder: {str(e)}'
-        }), 500
-
-# Thêm endpoint debug để kiểm tra storage
-@app.route('/api/debug/storage', methods=['GET'])
-def debug_storage():
-    """Debug endpoint để kiểm tra storage"""
-    try:
-        print(f"Debugging storage bucket: {SUPABASE_BUCKET}")
-        
-        # Thử nhiều cách khác nhau
-        methods_results = {}
-        
-        # Method 1: Basic list
-        try:
-            result1 = supabase.storage.from_(SUPABASE_BUCKET).list()
-            methods_results['basic_list'] = {
-                'success': True,
-                'data': result1,
-                'count': len(result1) if result1 else 0
-            }
-        except Exception as e:
-            methods_results['basic_list'] = {
-                'success': False,
-                'error': str(e)
-            }
-        
-        # Method 2: List with path
-        try:
-            result2 = supabase.storage.from_(SUPABASE_BUCKET).list(path="")
-            methods_results['list_with_path'] = {
-                'success': True,
-                'data': result2,
-                'count': len(result2) if result2 else 0
-            }
-        except Exception as e:
-            methods_results['list_with_path'] = {
-                'success': False,
-                'error': str(e)
-            }
-        
-        # Method 3: List with options
-        try:
-            result3 = supabase.storage.from_(SUPABASE_BUCKET).list(path="", options={"limit": 100})
-            methods_results['list_with_options'] = {
-                'success': True,
-                'data': result3,
-                'count': len(result3) if result3 else 0
-            }
-        except Exception as e:
-            methods_results['list_with_options'] = {
-                'success': False,
-                'error': str(e)
-            }
-        
-        return jsonify({
-            'success': True,
-            'bucket': SUPABASE_BUCKET,
-            'methods': methods_results
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-@app.route('/api/folders/stats', methods=['GET'])
-def get_folder_stats():
-    """API để lấy thống kê chi tiết về folders"""
-    try:
-        # Lấy tất cả submissions
-        result = supabase.table('submissions').select('*').execute()
-        
-        folder_stats = {}
-        total_submissions = len(result.data)
-        
-        for submission in result.data:
-            folder_name = submission.get('folder_name', 'Không có thư mục')
-            
-            if folder_name not in folder_stats:
-                folder_stats[folder_name] = {
-                    'name': folder_name,
-                    'submission_count': 0,
-                    'total_file_size': 0,
-                    'file_count': 0,
-                    'last_upload': None,
-                    'contributors': set(),
-                    'file_types': {}
-                }
-            
-            stats = folder_stats[folder_name]
-            stats['submission_count'] += 1
-            
-            # File size
-            file_size = submission.get('file_size', 0) or 0
-            if isinstance(file_size, str):
-                file_size = int(file_size) if file_size.isdigit() else 0
-            stats['total_file_size'] += file_size
-            
-            # File count
-            if submission.get('file_name'):
-                stats['file_count'] += 1
-                
-                # File type
-                file_name = submission.get('file_name', '')
-                if '.' in file_name:
-                    file_ext = file_name.split('.')[-1].lower()
-                    stats['file_types'][file_ext] = stats['file_types'].get(file_ext, 0) + 1
-            
-            # Contributor
-            ho_ten = submission.get('ho_ten')
-            if ho_ten:
-                stats['contributors'].add(ho_ten)
-            
-            # Last upload
-            upload_time = submission.get('upload_time')
-            if upload_time and (not stats['last_upload'] or upload_time > stats['last_upload']):
-                stats['last_upload'] = upload_time
-        
-        # Convert sets to lists và format
-        formatted_stats = []
-        for folder_name, stats in folder_stats.items():
-            formatted_stat = {
-                'name': folder_name,
-                'submission_count': stats['submission_count'],
-                'file_count': stats['file_count'],
-                'total_file_size': stats['total_file_size'],
-                'total_file_size_human': format_file_size(stats['total_file_size']),
-                'contributor_count': len(stats['contributors']),
-                'contributors': list(stats['contributors']),
-                'file_types': stats['file_types'],
-                'last_upload': stats['last_upload'],
-                'percentage': round((stats['submission_count'] / total_submissions) * 100, 2) if total_submissions > 0 else 0
-            }
-            formatted_stats.append(formatted_stat)
-        
-        # Sắp xếp theo số lượng submission
-        formatted_stats.sort(key=lambda x: x['submission_count'], reverse=True)
-        
-        return jsonify({
-            'success': True,
-            'folder_stats': formatted_stats,
-            'summary': {
-                'total_folders': len(formatted_stats),
-                'total_submissions': total_submissions,
-                'folders_with_files': len([f for f in formatted_stats if f['file_count'] > 0]),
-                'empty_folders': len([f for f in formatted_stats if f['file_count'] == 0])
-            }
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f'Lỗi lấy thống kê folder: {str(e)}'
-        }), 500
-
-@app.route('/api/folders/create-defaults', methods=['POST'])
-def create_default_folders_api():
-    """API để tạo các thư mục mặc định - Chỉ tạo thư mục trống"""
-    try:
-        # Lấy danh sách thư mục từ request hoặc sử dụng mặc định
-        data = request.get_json() or {}
-        
-        # Thư mục mặc định tiếng Việt
-        default_folders = data.get('folders', [
-            'Đề tài nghiên cứu khoa học',
-            'Báo cáo thực tập',
-            'Luận văn - Luận án',
-            'Tài liệu tham khảo',
-            'Hình ảnh - Media',
-            'Báo cáo dự án',
-            'Tài liệu hướng dẫn',
-            'Mẫu biểu - Form',
-            'Chứng chỉ - Bằng cấp',
-            'Tài liệu hành chính'
-        ])
-        
-        created_folders = []
-        existing_folders = []
-        errors = []
-        
-        # Kiểm tra folders đã tồn tại
-        try:
-            existing_files = supabase.storage.from_(SUPABASE_BUCKET).list()
-            existing_folder_names = set()
-            
-            if existing_files:
-                for file_item in existing_files:
-                    if '/' in file_item['name']:
-                        folder_name = file_item['name'].split('/')[0]
-                        existing_folder_names.add(folder_name)
-        except Exception as check_error:
-            print(f"Error checking existing folders: {str(check_error)}")
-            existing_folder_names = set()
-        
-        # Tạo từng thư mục
-        for folder_name in default_folders:
-            try:
-                safe_folder_name = secure_folder_name(folder_name)
-                
-                if not safe_folder_name:
-                    errors.append(f"{folder_name}: Tên không hợp lệ")
+            for item in items:
+                item_name = item.get('name', '')
+                if not item_name:
                     continue
-                
-                if safe_folder_name in existing_folder_names:
-                    existing_folders.append(safe_folder_name)
-                    continue
-                
-                # Tạo file trống để tạo thư mục (vì storage cần ít nhất 1 file)
-                placeholder_path = f"{safe_folder_name}/.gitkeep"
-                
-                try:
-                    # Upload file trống để tạo thư mục
-                    upload_result = supabase.storage.from_(SUPABASE_BUCKET).upload(
-                        placeholder_path,
-                        b'',  # File trống
-                        {
-                            'content-type': 'text/plain',
-                            'upsert': 'false'
-                        }
-                    )
                     
-                    if upload_result:
-                        created_folders.append(safe_folder_name)
-                    else:
-                        errors.append(f"{safe_folder_name}: Không thể tạo thư mục")
-                        
-                except Exception as upload_error:
-                    error_msg = str(upload_error)
-                    if "already exists" in error_msg.lower():
-                        existing_folders.append(safe_folder_name)
-                    else:
-                        errors.append(f"{safe_folder_name}: {error_msg}")
-                        
-            except Exception as folder_error:
-                errors.append(f"{folder_name}: {str(folder_error)}")
-        
-        # Tạo response
-        response_data = {
-            'success': True,
-            'message': f'Hoàn thành khởi tạo thư mục mặc định',
-            'results': {
-                'created': {
-                    'folders': created_folders,
-                    'count': len(created_folders)
-                },
-                'existing': {
-                    'folders': existing_folders,
-                    'count': len(existing_folders)
-                },
-                'errors': {
-                    'details': errors,
-                    'count': len(errors)
-                }
-            },
-            'summary': {
-                'total_requested': len(default_folders),
-                'successfully_created': len(created_folders),
-                'already_existed': len(existing_folders),
-                'failed': len(errors)
-            }
-        }
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        print(f"Error in create_default_folders_api: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': f'Lỗi tạo thư mục mặc định: {str(e)}'
-        }), 500
+                # Tạo full path
+                if current_path:
+                    full_path = f"{current_path}/{item_name}"
+                else:
+                    full_path = item_name
+                
+                # Kiểm tra xem đây là file hay folder
+                # Folder thường có size = 0 hoặc None và updated_at = None
+                metadata = item.get('metadata', {}) or {}
+                file_size = metadata.get('size', 0) or 0
+                updated_at = item.get('updated_at')
+                
+                # Nếu là folder (size = 0 và không có updated_at)
+                if file_size == 0 and updated_at is None:
+                    # Thêm folder vào queue để xử lý
+                    folders_to_process.append(full_path)
+                else:
+                    # Đây là file thật
+                    all_files.append({
+                        'name': item_name,
+                        'full_path': full_path,
+                        'folder': current_path,
+                        'size': file_size,
+                        'updated_at': updated_at,
+                        'metadata': item
+                    })
+                
+                # Giới hạn số lượng files để tránh timeout
+                if len(all_files) >= max_files:
+                    break
+            
+            if len(all_files) >= max_files:
+                break
+                
+        except Exception as e:
+            print(f"Lỗi khi lấy files từ folder '{current_path}': {str(e)}")
+            continue
+    
+    return all_files
 
-@app.route('/api/folders/cleanup', methods=['POST'])
-def cleanup_empty_folders():
-    """API để dọn dẹp các thư mục trống (chỉ có README)"""
+# API để lấy preview cấu trúc thư mục trước khi download (FIXED)
+@app.route('/api/preview/storage-structure', methods=['GET'])
+def preview_storage_structure():
+    """
+    API để xem preview cấu trúc storage trước khi download
+    """
     try:
-        data = request.get_json() or {}
-        confirm = data.get('confirm', False)
-        
-        if not confirm:
+        if DEMO_MODE:
             return jsonify({
                 'success': False,
-                'error': 'Vui lòng xác nhận việc dọn dẹp bằng cách gửi {"confirm": true}'
+                'error': 'Tính năng này không khả dụng ở Demo Mode'
             }), 400
         
-        # Lấy tất cả files từ storage
-        files = supabase.storage.from_(SUPABASE_BUCKET).list()
+        print("🔍 Đang quét cấu trúc storage...")
         
-        if not files:
+        # Lấy tất cả files từ storage
+        all_files = get_all_storage_files(supabase, SUPABASE_BUCKET)
+        
+        if not all_files:
             return jsonify({
                 'success': True,
-                'message': 'Storage trống, không có gì để dọn dẹp',
-                'cleaned_folders': []
+                'message': 'Không tìm thấy files nào trong storage',
+                'data': {
+                    'folders': {},
+                    'root_files': [],
+                    'statistics': {
+                        'total_folders': 0,
+                        'total_files': 0,
+                        'total_size': 0,
+                        'total_size_human': '0 B'
+                    }
+                }
             })
         
-        # Nhóm files theo thư mục
-        folders = {}
-        for file_item in files:
-            if '/' in file_item['name']:
-                folder_name = file_item['name'].split('/')[0]
-                if folder_name not in folders:
-                    folders[folder_name] = []
-                folders[folder_name].append(file_item['name'])
+        # Phân tích cấu trúc
+        folders_structure = {}
+        root_files = []
+        total_size = 0
         
-        # Tìm thư mục chỉ có README
-        empty_folders = []
-        for folder_name, file_list in folders.items():
-            if len(file_list) == 1 and file_list[0].endswith('/README.md'):
-                empty_folders.append(folder_name)
-        
-        # Xóa các thư mục trống
-        cleaned_folders = []
-        errors = []
-        
-        for folder_name in empty_folders:
-            try:
-                # Xóa README file
-                readme_path = f"{folder_name}/README.md"
-                delete_result = supabase.storage.from_(SUPABASE_BUCKET).remove([readme_path])
+        for file_info in all_files:
+            file_name = file_info['name']
+            full_path = file_info['full_path']
+            folder = file_info['folder']
+            file_size = file_info['size']
+            updated_at = file_info['updated_at']
+            
+            total_size += file_size
+            
+            if folder and folder != "":
+                # File trong subfolder
+                if folder not in folders_structure:
+                    folders_structure[folder] = {
+                        'name': folder,
+                        'files': [],
+                        'file_count': 0,
+                        'total_size': 0
+                    }
                 
-                if delete_result:
-                    cleaned_folders.append(folder_name)
-                    
-                    # Xóa record trong database nếu có
-                    try:
-                        supabase.table('submissions').delete().eq('storage_path', readme_path).execute()
-                    except Exception as db_error:
-                        print(f"Error removing DB record for {folder_name}: {str(db_error)}")
-                        
-                else:
-                    errors.append(f"{folder_name}: Không thể xóa")
-                    
-            except Exception as delete_error:
-                errors.append(f"{folder_name}: {str(delete_error)}")
+                folders_structure[folder]['files'].append({
+                    'name': file_name,
+                    'full_path': full_path,
+                    'size': file_size,
+                    'size_human': format_file_size(file_size),
+                    'updated_at': updated_at
+                })
+                folders_structure[folder]['file_count'] += 1
+                folders_structure[folder]['total_size'] += file_size
+                
+            else:
+                # File ở root
+                root_files.append({
+                    'name': file_name,
+                    'full_path': full_path,
+                    'size': file_size,
+                    'size_human': format_file_size(file_size),
+                    'updated_at': updated_at
+                })
+        
+        # Format folders
+        for folder_name, folder_info in folders_structure.items():
+            folder_info['total_size_human'] = format_file_size(folder_info['total_size'])
+        
+        # Tính toán thống kê
+        total_files = len(all_files)
+        
+        print(f"✅ Quét hoàn thành: {total_files} files trong {len(folders_structure)} folders")
         
         return jsonify({
             'success': True,
-            'message': f'Đã dọn dẹp {len(cleaned_folders)} thư mục trống',
-            'cleaned_folders': cleaned_folders,
-            'errors': errors,
-            'total_cleaned': len(cleaned_folders),
-            'total_errors': len(errors)
+            'data': {
+                'folders': folders_structure,
+                'root_files': root_files,
+                'statistics': {
+                    'total_folders': len(folders_structure),
+                    'total_files': total_files,
+                    'total_size': total_size,
+                    'total_size_human': format_file_size(total_size),
+                    'folders_with_files': len([f for f in folders_structure.values() if f['file_count'] > 0]),
+                    'root_file_count': len(root_files)
+                }
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Lỗi lấy cấu trúc storage: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi lấy cấu trúc storage: {str(e)}'
+        }), 500
+@app.route('/api/download/all-folders', methods=['GET', 'POST'])
+def download_all_folders():
+    """
+    API để download tất cả folders và files từ Supabase Storage về máy local
+    Hỗ trợ incremental sync - chỉ tải file mới/thay đổi từ lần 2
+    
+    Query Parameters:
+    - format: 'zip' hoặc 'folders' (default: 'folders')
+    - path: đường dẫn lưu local (default: './downloads')
+    - include_metadata: true/false - có lưu metadata không (default: true)
+    - force_full: true/false - buộc download toàn bộ (default: false)
+    - sync_mode: 'incremental' hoặc 'full' (default: 'incremental')
+    """
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': False,
+                'error': 'Tính năng này không khả dụng ở Demo Mode'
+            }), 400
+        
+        # Lấy parameters
+        download_format = request.args.get('format', 'folders').lower()
+        local_path = request.args.get('path', './downloads')
+        include_metadata = request.args.get('include_metadata', 'true').lower() == 'true'
+        force_full = request.args.get('force_full', 'false').lower() == 'true'
+        sync_mode = request.args.get('sync_mode', 'incremental').lower()
+        
+        # Tạo thư mục download nếu chưa có
+        download_dir = Path(local_path)
+        download_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Đường dẫn file sync state
+        sync_state_file = download_dir / '.sync_state.json'
+        
+        print(f"🚀 Bắt đầu {'full' if force_full or sync_mode == 'full' else 'incremental'} download...")
+        print(f"📁 Lưu tại: {download_dir.absolute()}")
+        print(f"📦 Format: {download_format}")
+        
+        # Đọc sync state từ lần download trước (nếu có)
+        previous_sync_state = {}
+        is_first_sync = True
+        
+        if sync_state_file.exists() and not force_full and sync_mode == 'incremental':
+            try:
+                with open(sync_state_file, 'r', encoding='utf-8') as f:
+                    previous_sync_state = json.load(f)
+                is_first_sync = False
+                print(f"📋 Tìm thấy sync state từ lần trước: {previous_sync_state.get('last_sync', 'N/A')}")
+            except Exception as e:
+                print(f"⚠️ Không thể đọc sync state: {e}. Sẽ thực hiện full sync.")
+                is_first_sync = True
+        
+        # Lấy tất cả files từ storage
+        try:
+            all_files = get_all_storage_files(supabase, SUPABASE_BUCKET)
+            
+            if not all_files:
+                return jsonify({
+                    'success': False,
+                    'error': 'Không tìm thấy file nào trong storage'
+                }), 404
+            
+            print(f"📊 Tìm thấy {len(all_files)} files trên storage")
+            
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': f'Lỗi lấy danh sách files: {str(e)}'
+            }), 500
+        
+        # Lấy danh sách folders từ storage để tạo cấu trúc thư mục
+        folders_on_storage = set()
+        files_to_process = []
+        
+        # Phân loại files và xác định files cần download
+        for file_info in all_files:
+            folder = file_info['folder']
+            file_path = file_info['full_path']
+            
+            # Thêm folder vào danh sách
+            if folder and folder != "":
+                folders_on_storage.add(folder)
+                # Thêm các parent folders nếu có nested structure
+                folder_parts = folder.split('/')
+                for i in range(1, len(folder_parts) + 1):
+                    parent_folder = '/'.join(folder_parts[:i])
+                    folders_on_storage.add(parent_folder)
+            
+            # Kiểm tra xem file có cần download không
+            should_download = True
+            
+            if not is_first_sync and sync_mode == 'incremental':
+                # So sánh với sync state trước
+                previous_file_info = previous_sync_state.get('files', {}).get(file_path)
+                
+                if previous_file_info:
+                    # So sánh updated_at và size
+                    current_updated = file_info.get('updated_at', '')
+                    previous_updated = previous_file_info.get('updated_at', '')
+                    current_size = file_info.get('size', 0)
+                    previous_size = previous_file_info.get('size', 0)
+                    
+                    if (current_updated == previous_updated and 
+                        current_size == previous_size):
+                        # File không thay đổi, kiểm tra xem file local có tồn tại không
+                        if folder:
+                            local_file_path = download_dir / folder / file_info['name']
+                        else:
+                            local_file_path = download_dir / file_info['name']
+                        
+                        if local_file_path.exists():
+                            should_download = False
+                            print(f"⏭️ Skip unchanged file: {file_path}")
+            
+            if should_download:
+                files_to_process.append(file_info)
+        
+        print(f"📁 Tìm thấy {len(folders_on_storage)} folders trên storage")
+        print(f"📄 Cần download {len(files_to_process)} files")
+        
+        # Tạo tất cả folders trước khi download
+        print("🏗️ Tạo cấu trúc thư mục...")
+        for folder_name in sorted(folders_on_storage):
+            folder_path = download_dir / folder_name
+            folder_path.mkdir(parents=True, exist_ok=True)
+            print(f"   📁 Created: {folder_path}")
+        
+        # Nếu không có file nào cần download
+        if not files_to_process:
+            print("✅ Tất cả files đã được sync, không có gì để download!")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Tất cả files đã được sync, không có file mới để download',
+                'data': {
+                    'download_path': str(download_dir.absolute()),
+                    'sync_type': 'incremental',
+                    'statistics': {
+                        'total_folders': len(folders_on_storage),
+                        'total_files_on_storage': len(all_files),
+                        'files_to_download': 0,
+                        'already_synced': len(all_files),
+                        'total_size': 0
+                    }
+                }
+            })
+        
+        # Phân loại files cần download theo folders
+        folders_structure = {}
+        root_files = []
+        
+        for file_info in files_to_process:
+            folder = file_info['folder']
+            
+            if folder and folder != "":
+                if folder not in folders_structure:
+                    folders_structure[folder] = []
+                folders_structure[folder].append(file_info)
+            else:
+                root_files.append(file_info)
+        
+        download_results = {
+            'folders': {},
+            'root_files': [],
+            'total_files': 0,
+            'total_size': 0,
+            'errors': [],
+            'skipped_files': len(all_files) - len(files_to_process)
+        }
+        
+        # Function để tính checksum của file
+        def calculate_file_checksum(file_path):
+            try:
+                hash_md5 = hashlib.md5()
+                with open(file_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        hash_md5.update(chunk)
+                return hash_md5.hexdigest()
+            except:
+                return None
+        
+        # Function để download một file
+        def download_single_file(file_info, local_file_path):
+            try:
+                storage_path = file_info['full_path']
+                
+                # Download file từ Supabase
+                file_data = supabase.storage.from_(SUPABASE_BUCKET).download(storage_path)
+                
+                if not file_data:
+                    return {
+                        'success': False,
+                        'error': f'Không thể download {storage_path}',
+                        'path': storage_path
+                    }
+                
+                # Tạo thư mục nếu cần (đã tạo trước đó nhưng đảm bảo)
+                local_file_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Ghi file
+                with open(local_file_path, 'wb') as f:
+                    f.write(file_data)
+                
+                file_size = len(file_data)
+                
+                # Tính checksum để verify
+                checksum = calculate_file_checksum(local_file_path)
+                
+                return {
+                    'success': True,
+                    'storage_path': storage_path,
+                    'local_path': str(local_file_path),
+                    'size': file_size,
+                    'checksum': checksum,
+                    'metadata': file_info
+                }
+                
+            except Exception as e:
+                return {
+                    'success': False,
+                    'error': str(e),
+                    'path': file_info['full_path']
+                }
+        
+        # Tạo current sync state để lưu
+        current_sync_state = {
+            'last_sync': datetime.now().isoformat(),
+            'sync_type': 'full' if is_first_sync else 'incremental',
+            'total_files_on_storage': len(all_files),
+            'files_downloaded': 0,
+            'files': {}
+        }
+        
+        # Download files theo format
+        if download_format == 'zip':
+            # Tạo file zip với timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            sync_type = 'full' if is_first_sync else 'incremental'
+            zip_filename = f"supabase_storage_{sync_type}_{timestamp}.zip"
+            zip_path = download_dir / zip_filename
+            
+            # Tạo thư mục temp
+            temp_dir = download_dir / 'temp'
+            temp_dir.mkdir(exist_ok=True)
+            
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                
+                # Download files trong folders
+                for folder_name, files in folders_structure.items():
+                    print(f"📁 Processing folder: {folder_name} ({len(files)} files)")
+                    
+                    folder_results = {
+                        'name': folder_name,
+                        'files': [],
+                        'total_files': len(files),
+                        'success_count': 0,
+                        'error_count': 0
+                    }
+                    
+                    for file_info in files:
+                        temp_file_path = temp_dir / file_info['full_path']
+                        result = download_single_file(file_info, temp_file_path)
+                        
+                        if result['success']:
+                            # Thêm vào zip với đúng cấu trúc thư mục
+                            zipf.write(temp_file_path, file_info['full_path'])
+                            
+                            folder_results['files'].append(result)
+                            folder_results['success_count'] += 1
+                            download_results['total_files'] += 1
+                            download_results['total_size'] += result['size']
+                            
+                            # Cập nhật sync state
+                            current_sync_state['files'][file_info['full_path']] = {
+                                'updated_at': file_info.get('updated_at'),
+                                'size': file_info.get('size'),
+                                'checksum': result['checksum']
+                            }
+                            
+                            # Xóa file temp
+                            temp_file_path.unlink()
+                            
+                        else:
+                            folder_results['error_count'] += 1
+                            download_results['errors'].append(result)
+                    
+                    download_results['folders'][folder_name] = folder_results
+                
+                # Download root files
+                if root_files:
+                    print(f"📄 Processing root files: {len(root_files)} files")
+                    
+                    for file_info in root_files:
+                        temp_file_path = temp_dir / file_info['name']
+                        result = download_single_file(file_info, temp_file_path)
+                        
+                        if result['success']:
+                            zipf.write(temp_file_path, file_info['name'])
+                            
+                            download_results['root_files'].append(result)
+                            download_results['total_files'] += 1
+                            download_results['total_size'] += result['size']
+                            
+                            # Cập nhật sync state
+                            current_sync_state['files'][file_info['full_path']] = {
+                                'updated_at': file_info.get('updated_at'),
+                                'size': file_info.get('size'),
+                                'checksum': result['checksum']
+                            }
+                            
+                            # Xóa file temp
+                            temp_file_path.unlink()
+                            
+                        else:
+                            download_results['errors'].append(result)
+                
+                # Thêm metadata file nếu cần
+                if include_metadata:
+                    metadata_content = {
+                        'download_info': {
+                            'timestamp': datetime.now().isoformat(),
+                            'sync_type': current_sync_state['sync_type'],
+                            'bucket': SUPABASE_BUCKET,
+                            'total_folders': len(folders_on_storage),
+                            'files_on_storage': len(all_files),
+                            'files_downloaded': download_results['total_files'],
+                            'files_skipped': download_results['skipped_files'],
+                            'total_size': download_results['total_size'],
+                            'total_size_human': format_file_size(download_results['total_size'])
+                        },
+                        'folders_structure': list(folders_on_storage),
+                        'downloaded_folders': folders_structure,
+                        'downloaded_root_files': root_files
+                    }
+                    
+                    metadata_path = temp_dir / 'metadata.json'
+                    with open(metadata_path, 'w', encoding='utf-8') as f:
+                        json.dump(metadata_content, f, indent=2, ensure_ascii=False, default=str)
+                    
+                    zipf.write(metadata_path, 'metadata.json')
+                    metadata_path.unlink()
+            
+            # Xóa thư mục temp
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+            
+            download_results['zip_file'] = str(zip_path)
+            download_results['zip_size'] = zip_path.stat().st_size
+            download_results['zip_size_human'] = format_file_size(zip_path.stat().st_size)
+            
+        else:
+            # Download thành folders riêng biệt
+            
+            # Download files trong folders
+            for folder_name, files in folders_structure.items():
+                print(f"📁 Downloading folder: {folder_name} ({len(files)} files)")
+                
+                folder_path = download_dir / folder_name
+                # Folder đã được tạo ở trên
+                
+                folder_results = {
+                    'name': folder_name,
+                    'path': str(folder_path),
+                    'files': [],
+                    'total_files': len(files),
+                    'success_count': 0,
+                    'error_count': 0
+                }
+                
+                for file_info in files:
+                    local_file_path = folder_path / file_info['name']
+                    
+                    result = download_single_file(file_info, local_file_path)
+                    
+                    if result['success']:
+                        folder_results['files'].append(result)
+                        folder_results['success_count'] += 1
+                        download_results['total_files'] += 1
+                        download_results['total_size'] += result['size']
+                        
+                        # Cập nhật sync state
+                        current_sync_state['files'][file_info['full_path']] = {
+                            'updated_at': file_info.get('updated_at'),
+                            'size': file_info.get('size'),
+                            'checksum': result['checksum']
+                        }
+                    else:
+                        folder_results['error_count'] += 1
+                        download_results['errors'].append(result)
+                
+                download_results['folders'][folder_name] = folder_results
+            
+            # Download root files
+            if root_files:
+                print(f"📄 Downloading root files: {len(root_files)} files")
+                
+                for file_info in root_files:
+                    local_file_path = download_dir / file_info['name']
+                    
+                    result = download_single_file(file_info, local_file_path)
+                    
+                    if result['success']:
+                        download_results['root_files'].append(result)
+                        download_results['total_files'] += 1
+                        download_results['total_size'] += result['size']
+                        
+                        # Cập nhật sync state
+                        current_sync_state['files'][file_info['full_path']] = {
+                            'updated_at': file_info.get('updated_at'),
+                            'size': file_info.get('size'),
+                            'checksum': result['checksum']
+                        }
+                    else:
+                        download_results['errors'].append(result)
+        
+        # Cập nhật sync state với files từ previous state (files không thay đổi)
+        if not is_first_sync:
+            for file_path, file_data in previous_sync_state.get('files', {}).items():
+                if file_path not in current_sync_state['files']:
+                    # File này không được download lần này (không thay đổi)
+                    current_sync_state['files'][file_path] = file_data
+        
+        current_sync_state['files_downloaded'] = download_results['total_files']
+        
+        # Lưu sync state mới
+        try:
+            with open(sync_state_file, 'w', encoding='utf-8') as f:
+                json.dump(current_sync_state, f, indent=2, ensure_ascii=False, default=str)
+            print(f"💾 Đã lưu sync state tại: {sync_state_file}")
+        except Exception as e:
+            print(f"⚠️ Không thể lưu sync state: {e}")
+        
+        # Tạo metadata file nếu cần (cho folder mode)
+        if include_metadata and download_format != 'zip':
+            metadata_content = {
+                'download_info': {
+                    'timestamp': datetime.now().isoformat(),
+                    'sync_type': current_sync_state['sync_type'],
+                    'bucket': SUPABASE_BUCKET,
+                    'total_folders': len(folders_on_storage),
+                    'files_on_storage': len(all_files),
+                    'files_downloaded': download_results['total_files'],
+                    'files_skipped': download_results['skipped_files'],
+                    'total_size': download_results['total_size'],
+                    'total_size_human': format_file_size(download_results['total_size'])
+                },
+                'folders_structure': list(folders_on_storage),
+                'download_results': download_results
+            }
+            
+            metadata_path = download_dir / 'download_metadata.json'
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata_content, f, indent=2, ensure_ascii=False, default=str)
+            
+            download_results['metadata_file'] = str(metadata_path)
+        
+        # Tính toán thống kê cuối
+        success_count = download_results['total_files']
+        error_count = len(download_results['errors'])
+        skipped_count = download_results['skipped_files']
+        
+        print(f"✅ {'Full' if is_first_sync else 'Incremental'} sync hoàn thành!")
+        print(f"📊 Thống kê:")
+        print(f"   - Tổng folders: {len(folders_on_storage)}")
+        print(f"   - Files trên storage: {len(all_files)}")
+        print(f"   - Files downloaded: {success_count}")
+        print(f"   - Files skipped: {skipped_count}")
+        print(f"   - Files lỗi: {error_count}")
+        print(f"   - Tổng dung lượng downloaded: {format_file_size(download_results['total_size'])}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'{"Full" if is_first_sync else "Incremental"} sync hoàn thành: {success_count} files downloaded, {skipped_count} files skipped',
+            'data': {
+                'download_path': str(download_dir.absolute()),
+                'format': download_format,
+                'sync_type': current_sync_state['sync_type'],
+                'statistics': {
+                    'total_folders': len(folders_on_storage),
+                    'files_on_storage': len(all_files),
+                    'files_downloaded': success_count,
+                    'files_skipped': skipped_count,
+                    'files_failed': error_count,
+                    'total_size': download_results['total_size'],
+                    'total_size_human': format_file_size(download_results['total_size'])
+                },
+                'results': download_results
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Lỗi download folders: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi download: {str(e)}'
+        }), 500
+
+
+# Helper function để lấy danh sách tất cả folders từ storage
+def get_all_folders_from_storage(supabase_client, bucket_name):
+    """
+    Lấy danh sách tất cả folders từ Supabase Storage
+    """
+    try:
+        # Lấy tất cả files
+        result = supabase_client.storage.from_(bucket_name).list()
+        
+        folders = set()
+        
+        def extract_folders_recursive(items, current_path=""):
+            for item in items:
+                item_name = item.get('name', '')
+                
+                if current_path:
+                    full_path = f"{current_path}/{item_name}"
+                else:
+                    full_path = item_name
+                
+                # Nếu là folder (không có metadata file info)
+                if item.get('metadata') is None or 'size' not in item.get('metadata', {}):
+                    folders.add(full_path)
+                    
+                    # Recursively list contents of this folder
+                    try:
+                        subfolder_result = supabase_client.storage.from_(bucket_name).list(full_path)
+                        extract_folders_recursive(subfolder_result, full_path)
+                    except:
+                        pass  # Ignore errors when listing subfolders
+                else:
+                    # File - extract its parent folder
+                    if '/' in full_path:
+                        parent_folder = '/'.join(full_path.split('/')[:-1])
+                        folders.add(parent_folder)
+        
+        extract_folders_recursive(result)
+        
+        return list(folders)
+        
+    except Exception as e:
+        print(f"Error getting folders: {e}")
+        return []
+
+
+# API để lấy danh sách folders
+@app.route('/api/storage/folders', methods=['GET'])
+def get_storage_folders():
+    """
+    API để lấy danh sách tất cả folders trong Supabase Storage
+    """
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': False,
+                'error': 'Tính năng này không khả dụng ở Demo Mode'
+            }), 400
+        
+        folders = get_all_folders_from_storage(supabase, SUPABASE_BUCKET)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'folders': sorted(folders),
+                'total_folders': len(folders)
+            }
         })
         
     except Exception as e:
         return jsonify({
             'success': False,
-            'error': f'Lỗi dọn dẹp thư mục: {str(e)}'
+            'error': f'Lỗi lấy danh sách folders: {str(e)}'
         }), 500
+
+# Thay thế 2 API functions này trong file chính
+
+# API để rename thư mục - FIXED VERSION
+@app.route('/api/storage/rename-folder', methods=['POST'])
+def rename_folder():
+    """
+    API để đổi tên thư mục trong storage - Fixed version
+    """
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': False,
+                'error': 'Tính năng này không khả dụng ở Demo Mode'
+            }), 400
         
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Không có dữ liệu JSON'
+            }), 400
+            
+        old_folder_name = data.get('old_folder_name', '').strip()
+        new_folder_name = data.get('new_folder_name', '').strip()
+        
+        if not old_folder_name or not new_folder_name:
+            return jsonify({
+                'success': False,
+                'error': 'Tên thư mục cũ và mới không được để trống'
+            }), 400
+        
+        if old_folder_name == new_folder_name:
+            return jsonify({
+                'success': False,
+                'error': 'Tên thư mục mới phải khác với tên cũ'
+            }), 400
+        
+        # Validate tên folder mới
+        if '/' in new_folder_name or '\\' in new_folder_name:
+            return jsonify({
+                'success': False,
+                'error': 'Tên thư mục không được chứa ký tự / hoặc \\'
+            }), 400
+        
+        print(f"🔄 Đang rename folder '{old_folder_name}' → '{new_folder_name}'...")
+        
+        # Lấy tất cả files trong folder cũ
+        all_files = get_all_storage_files(supabase, SUPABASE_BUCKET)
+        folder_files = [f for f in all_files if f['folder'] == old_folder_name]
+        
+        if not folder_files:
+            return jsonify({
+                'success': False,
+                'error': f'Không tìm thấy thư mục "{old_folder_name}" hoặc thư mục rỗng'
+            }), 404
+        
+        # Kiểm tra folder mới đã tồn tại chưa
+        existing_new_folder = [f for f in all_files if f['folder'] == new_folder_name]
+        if existing_new_folder:
+            return jsonify({
+                'success': False,
+                'error': f'Thư mục "{new_folder_name}" đã tồn tại'
+            }), 400
+        
+        # Thực hiện copy + delete cho từng file (vì Supabase không có move trực tiếp)
+        moved_files = []
+        failed_files = []
+        
+        for file_info in folder_files:
+            old_path = file_info['full_path']
+            new_path = f"{new_folder_name}/{file_info['name']}"
+            
+            try:
+                print(f"  📄 Moving: {old_path} → {new_path}")
+                
+                # Bước 1: Download file content
+                download_response = supabase.storage.from_(SUPABASE_BUCKET).download(old_path)
+                
+                if not download_response:
+                    failed_files.append({
+                        'file': file_info['name'],
+                        'error': 'Không thể download file từ path cũ'
+                    })
+                    continue
+                
+                # Bước 2: Upload với path mới
+                upload_response = supabase.storage.from_(SUPABASE_BUCKET).upload(
+                    path=new_path,
+                    file=download_response,
+                    file_options={
+                        "content-type": file_info.get('metadata', {}).get('content-type', 'application/octet-stream')
+                    }
+                )
+                
+                # Kiểm tra upload thành công
+                if hasattr(upload_response, 'error') and upload_response.error:
+                    failed_files.append({
+                        'file': file_info['name'],
+                        'error': f'Upload failed: {upload_response.error}'
+                    })
+                    continue
+                
+                # Bước 3: Xóa file cũ
+                delete_response = supabase.storage.from_(SUPABASE_BUCKET).remove([old_path])
+                
+                # Kiểm tra xóa thành công
+                if hasattr(delete_response, 'error') and delete_response.error:
+                    print(f"⚠️ Warning: Couldn't delete old file {old_path}: {delete_response.error}")
+                    # Không fail toàn bộ operation vì file mới đã được tạo
+                
+                moved_files.append({
+                    'old_path': old_path,
+                    'new_path': new_path,
+                    'file_name': file_info['name']
+                })
+                    
+            except Exception as e:
+                failed_files.append({
+                    'file': file_info['name'],
+                    'error': str(e)
+                })
+                print(f"❌ Error moving {file_info['name']}: {str(e)}")
+        
+        if len(failed_files) == len(folder_files):
+            # Tất cả files đều fail
+            return jsonify({
+                'success': False,
+                'error': 'Không thể move bất kỳ file nào',
+                'details': {
+                    'failed_files': failed_files
+                }
+            }), 500
+        
+        success_count = len(moved_files)
+        total_count = len(folder_files)
+        
+        print(f"✅ Rename folder: {success_count}/{total_count} files moved successfully")
+        
+        # Nếu có một số files fail nhưng không phải tất cả
+        if failed_files:
+            return jsonify({
+                'success': True,
+                'message': f'Đã đổi tên thư mục "{old_folder_name}" thành "{new_folder_name}" ({success_count}/{total_count} files)',
+                'warning': f'{len(failed_files)} files không thể move',
+                'data': {
+                    'old_folder_name': old_folder_name,
+                    'new_folder_name': new_folder_name,
+                    'moved_files_count': success_count,
+                    'failed_files_count': len(failed_files),
+                    'moved_files': moved_files,
+                    'failed_files': failed_files
+                }
+            })
+        
+        return jsonify({
+            'success': True,
+            'message': f'Đã đổi tên thư mục "{old_folder_name}" thành "{new_folder_name}" thành công',
+            'data': {
+                'old_folder_name': old_folder_name,
+                'new_folder_name': new_folder_name,
+                'moved_files_count': success_count,
+                'moved_files': moved_files
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Lỗi rename folder: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi rename folder: {str(e)}'
+        }), 500
+
+
+# API để xóa thư mục - FIXED VERSION (Sử dụng POST thay vì DELETE để tránh conflict)
+@app.route('/api/storage/delete-folder', methods=['POST', 'DELETE'])
+def delete_folder():
+    """
+    API để xóa thư mục và tất cả files bên trong - Fixed version
+    Hỗ trợ cả POST và DELETE methods
+    """
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': False,
+                'error': 'Tính năng này không khả dụng ở Demo Mode'
+            }), 400
+        
+        # Xử lý data từ request
+        if request.method == 'POST':
+            data = request.get_json()
+        else:  # DELETE method
+            data = request.get_json() if request.is_json else {}
+            # Nếu không có JSON data, thử lấy từ query params
+            if not data:
+                folder_name = request.args.get('folder_name', '').strip()
+                confirm_delete = request.args.get('confirm_delete', '').lower() == 'true'
+                data = {
+                    'folder_name': folder_name,
+                    'confirm_delete': confirm_delete
+                }
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Không có dữ liệu request'
+            }), 400
+            
+        folder_name = data.get('folder_name', '').strip()
+        confirm_delete = data.get('confirm_delete', False)
+        
+        if not folder_name:
+            return jsonify({
+                'success': False,
+                'error': 'Tên thư mục không được để trống'
+            }), 400
+        
+        if not confirm_delete:
+            return jsonify({
+                'success': False,
+                'error': 'Vui lòng xác nhận xóa thư mục bằng cách set confirm_delete = true'
+            }), 400
+        
+        print(f"🗑️ Đang xóa folder '{folder_name}'...")
+        
+        # Lấy tất cả files trong folder
+        all_files = get_all_storage_files(supabase, SUPABASE_BUCKET)
+        folder_files = [f for f in all_files if f['folder'] == folder_name]
+        
+        if not folder_files:
+            return jsonify({
+                'success': False,
+                'error': f'Không tìm thấy thư mục "{folder_name}" hoặc thư mục rỗng'
+            }), 404
+        
+        print(f"📊 Tìm thấy {len(folder_files)} files để xóa")
+        
+        # Chuẩn bị danh sách paths để xóa
+        file_paths = [f['full_path'] for f in folder_files]
+        
+        # Thực hiện xóa theo batch (Supabase có thể xóa nhiều files cùng lúc)
+        deleted_files = []
+        failed_files = []
+        
+        # Chia nhỏ thành batches để tránh timeout (20 files/batch để tăng độ ổn định)
+        batch_size = 20
+        total_batches = (len(file_paths) + batch_size - 1) // batch_size
+        
+        for i in range(0, len(file_paths), batch_size):
+            batch_paths = file_paths[i:i + batch_size]
+            batch_files = folder_files[i:i + batch_size]
+            current_batch = i // batch_size + 1
+            
+            try:
+                print(f"🗂️ Xóa batch {current_batch}/{total_batches}: {len(batch_paths)} files")
+                
+                # Xóa batch files
+                delete_response = supabase.storage.from_(SUPABASE_BUCKET).remove(batch_paths)
+                
+                # Kiểm tra response (Supabase trả về list hoặc có thể có error)
+                if hasattr(delete_response, 'error') and delete_response.error:
+                    # Nếu batch fail, thử xóa từng file riêng
+                    print(f"⚠️ Batch delete failed: {delete_response.error}, trying individual files...")
+                    
+                    for j, file_path in enumerate(batch_paths):
+                        try:
+                            single_response = supabase.storage.from_(SUPABASE_BUCKET).remove([file_path])
+                            
+                            if hasattr(single_response, 'error') and single_response.error:
+                                failed_files.append({
+                                    'file': batch_files[j]['name'],
+                                    'path': file_path,
+                                    'error': str(single_response.error)
+                                })
+                            else:
+                                deleted_files.append({
+                                    'file': batch_files[j]['name'],
+                                    'path': file_path,
+                                    'size': batch_files[j]['size']
+                                })
+                        except Exception as e:
+                            failed_files.append({
+                                'file': batch_files[j]['name'],
+                                'path': file_path,
+                                'error': str(e)
+                            })
+                else:
+                    # Batch delete thành công
+                    for file_info in batch_files:
+                        deleted_files.append({
+                            'file': file_info['name'],
+                            'path': file_info['full_path'],
+                            'size': file_info['size']
+                        })
+                    
+            except Exception as e:
+                print(f"❌ Error deleting batch {current_batch}: {str(e)}")
+                # Nếu có lỗi với batch, thử xóa từng file
+                for j, file_path in enumerate(batch_paths):
+                    try:
+                        single_response = supabase.storage.from_(SUPABASE_BUCKET).remove([file_path])
+                        
+                        if hasattr(single_response, 'error') and single_response.error:
+                            failed_files.append({
+                                'file': batch_files[j]['name'],
+                                'path': file_path,
+                                'error': str(single_response.error)
+                            })
+                        else:
+                            deleted_files.append({
+                                'file': batch_files[j]['name'],
+                                'path': file_path,
+                                'size': batch_files[j]['size']
+                            })
+                    except Exception as inner_e:
+                        failed_files.append({
+                            'file': batch_files[j]['name'],
+                            'path': file_path,
+                            'error': str(inner_e)
+                        })
+        
+        # Tính toán kết quả
+        success_count = len(deleted_files)
+        failed_count = len(failed_files)
+        total_count = len(folder_files)
+        
+        if success_count == 0:
+            return jsonify({
+                'success': False,
+                'error': f'Không thể xóa bất kỳ file nào trong thư mục "{folder_name}"',
+                'details': {
+                    'failed_files': failed_files
+                }
+            }), 500
+        
+        # Tính tổng size đã xóa
+        total_deleted_size = sum(f['size'] for f in deleted_files)
+        
+        print(f"✅ Xóa folder hoàn thành: {success_count}/{total_count} files")
+        
+        # Nếu có một số files fail
+        if failed_files:
+            return jsonify({
+                'success': True,
+                'message': f'Đã xóa thư mục "{folder_name}" ({success_count}/{total_count} files)',
+                'warning': f'{failed_count} files không thể xóa',
+                'data': {
+                    'folder_name': folder_name,
+                    'deleted_files_count': success_count,
+                    'failed_files_count': failed_count,
+                    'total_deleted_size': total_deleted_size,
+                    'total_deleted_size_human': format_file_size(total_deleted_size),
+                    'deleted_files': deleted_files,
+                    'failed_files': failed_files
+                }
+            })
+        
+        return jsonify({
+            'success': True,
+            'message': f'Đã xóa thư mục "{folder_name}" và tất cả {success_count} files',
+            'data': {
+                'folder_name': folder_name,
+                'deleted_files_count': success_count,
+                'total_deleted_size': total_deleted_size,
+                'total_deleted_size_human': format_file_size(total_deleted_size),
+                'deleted_files': deleted_files
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Lỗi delete folder: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi delete folder: {str(e)}'
+        }), 500
+
+
+# API để test connection Supabase
+@app.route('/api/storage/test-connection', methods=['GET'])
+def test_supabase_connection():
+    """
+    API để test kết nối Supabase
+    """
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': True,
+                'message': 'Đang chạy ở Demo Mode',
+                'data': {
+                    'demo_mode': True,
+                    'supabase_configured': False
+                }
+            })
+        
+        # Test bằng cách list files
+        test_result = supabase.storage.from_(SUPABASE_BUCKET).list(path="", options={"limit": 1})
+        
+        return jsonify({
+            'success': True,
+            'message': 'Kết nối Supabase thành công',
+            'data': {
+                'demo_mode': False,
+                'supabase_configured': True,
+                'bucket_name': SUPABASE_BUCKET,
+                'supabase_url': SUPABASE_URL,
+                'test_result': 'OK'
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi kết nối Supabase: {str(e)}',
+            'data': {
+                'demo_mode': DEMO_MODE,
+                'supabase_configured': bool(SUPABASE_URL and SUPABASE_KEY),
+                'bucket_name': SUPABASE_BUCKET
+            }
+        }), 500
+
+
+# API để tạo thư mục mới (Bonus function)
+@app.route('/api/storage/create-folder', methods=['POST'])
+def create_folder():
+    """
+    API để tạo thư mục mới bằng cách upload file placeholder
+    """
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': False,
+                'error': 'Tính năng này không khả dụng ở Demo Mode'
+            }), 400
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Không có dữ liệu JSON'
+            }), 400
+            
+        folder_name = data.get('folder_name', '').strip()
+        
+        if not folder_name:
+            return jsonify({
+                'success': False,
+                'error': 'Tên thư mục không được để trống'
+            }), 400
+        
+        # Validate tên folder
+        if '/' in folder_name or '\\' in folder_name:
+            return jsonify({
+                'success': False,
+                'error': 'Tên thư mục không được chứa ký tự / hoặc \\'
+            }), 400
+        
+        # Kiểm tra folder đã tồn tại chưa
+        all_files = get_all_storage_files(supabase, SUPABASE_BUCKET)
+        existing_folder = [f for f in all_files if f['folder'] == folder_name]
+        
+        if existing_folder:
+            return jsonify({
+                'success': False,
+                'error': f'Thư mục "{folder_name}" đã tồn tại'
+            }), 400
+        
+        # Tạo folder bằng cách upload file .gitkeep
+        placeholder_path = f"{folder_name}/.gitkeep"
+        placeholder_content = "# This file keeps the folder structure\n"
+        
+        upload_response = supabase.storage.from_(SUPABASE_BUCKET).upload(
+            path=placeholder_path,
+            file=placeholder_content.encode('utf-8'),
+            file_options={
+                "content-type": "text/plain"
+            }
+        )
+        
+        if hasattr(upload_response, 'error') and upload_response.error:
+            return jsonify({
+                'success': False,
+                'error': f'Không thể tạo thư mục: {upload_response.error}'
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'message': f'Đã tạo thư mục "{folder_name}" thành công',
+            'data': {
+                'folder_name': folder_name,
+                'placeholder_file': '.gitkeep'
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Lỗi create folder: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi create folder: {str(e)}'
+        }), 500
+
+# API để lấy thông tin chi tiết của 1 thư mục
+@app.route('/api/storage/folder-info/<folder_name>', methods=['GET'])
+def get_folder_info(folder_name):
+    """
+    API để lấy thông tin chi tiết của 1 thư mục
+    """
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': False,
+                'error': 'Tính năng này không khả dụng ở Demo Mode'
+            }), 400
+        
+        folder_name = folder_name.strip()
+        if not folder_name:
+            return jsonify({
+                'success': False,
+                'error': 'Tên thư mục không được để trống'
+            }), 400
+        
+        print(f"📁 Đang lấy thông tin folder '{folder_name}'...")
+        
+        # Lấy tất cả files trong folder
+        all_files = get_all_storage_files(supabase, SUPABASE_BUCKET)
+        folder_files = [f for f in all_files if f['folder'] == folder_name]
+        
+        if not folder_files:
+            return jsonify({
+                'success': False,
+                'error': f'Không tìm thấy thư mục "{folder_name}"'
+            }), 404
+        
+        # Tính toán thống kê
+        total_size = sum(f['size'] for f in folder_files)
+        file_types = {}
+        
+        for file_info in folder_files:
+            file_name = file_info['name']
+            file_ext = file_name.split('.')[-1].lower() if '.' in file_name else 'no_extension'
+            
+            if file_ext not in file_types:
+                file_types[file_ext] = {
+                    'count': 0,
+                    'total_size': 0
+                }
+            
+            file_types[file_ext]['count'] += 1
+            file_types[file_ext]['total_size'] += file_info['size']
+        
+        # Format file types
+        for ext, info in file_types.items():
+            info['total_size_human'] = format_file_size(info['total_size'])
+        
+        # Sắp xếp files theo size (lớn nhất trước)
+        sorted_files = sorted(folder_files, key=lambda x: x['size'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'folder_name': folder_name,
+                'file_count': len(folder_files),
+                'total_size': total_size,
+                'total_size_human': format_file_size(total_size),
+                'file_types': file_types,
+                'files': sorted_files,
+                'largest_files': sorted_files[:5],  # Top 5 files lớn nhất
+                'statistics': {
+                    'total_file_types': len(file_types),
+                    'average_file_size': total_size // len(folder_files) if folder_files else 0,
+                    'average_file_size_human': format_file_size(total_size // len(folder_files)) if folder_files else '0 B'
+                }
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Lỗi lấy thông tin folder: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi lấy thông tin folder: {str(e)}'
+        }), 500
+      
 @app.route('/api/submissions', methods=['GET'])
 def get_submissions():
-    """
-    API để lấy danh sách submissions với tính năng filter, sort, pagination
-    
-    Query Parameters:
-    - page: Số trang (default: 1)
-    - limit: Số record per page (default: 10, max: 100)
-    - sort_by: Trường để sort (default: upload_time)
-    - sort_order: asc hoặc desc (default: desc)
-    - folder: Filter theo folder
-    - search: Tìm kiếm theo tên hoặc đề tài
-    - date_from: Lọc từ ngày (YYYY-MM-DD)
-    - date_to: Lọc đến ngày (YYYY-MM-DD)
-    - has_file: true/false - Lọc có file hay không
-    """
     try:
         # Lấy query parameters
         page = int(request.args.get('page', 1))
@@ -1675,80 +2369,5 @@ def get_submissions_stats():
             'error': f'Lỗi lấy thống kê submissions: {str(e)}'
         }), 500
 
-@app.route('/api/submissions/bulk-delete', methods=['POST'])
-def bulk_delete_submissions():
-    """API để xóa nhiều submissions cùng lúc"""
-    try:
-        data = request.get_json()
-        if not data or 'ids' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'Vui lòng cung cấp danh sách IDs'
-            }), 400
-        
-        submission_ids = data['ids']
-        if not isinstance(submission_ids, list) or not submission_ids:
-            return jsonify({
-                'success': False,
-                'error': 'Danh sách IDs không hợp lệ'
-            }), 400
-        
-        if DEMO_MODE:
-            return jsonify({
-                'success': True,
-                'message': f'Demo mode: Đã xóa {len(submission_ids)} submissions (giả lập)',
-                'deleted_count': len(submission_ids),
-                'demo_mode': True
-            })
-        
-        # Get submissions info first
-        submissions_result = supabase.table('submissions').select('*').in_('id', submission_ids).execute()
-        
-        if not submissions_result.data:
-            return jsonify({
-                'success': False,
-                'error': 'Không tìm thấy submissions nào'
-            }), 404
-        
-        # Collect storage paths
-        storage_paths = []
-        for submission in submissions_result.data:
-            storage_path = submission.get('storage_path')
-            if storage_path:
-                storage_paths.append(storage_path)
-        
-        # Delete files from storage
-        deleted_files = []
-        failed_files = []
-        
-        if storage_paths:
-            try:
-                delete_result = supabase.storage.from_(SUPABASE_BUCKET).remove(storage_paths)
-                deleted_files = storage_paths
-                print(f"Bulk deleted files from storage: {storage_paths}")
-            except Exception as storage_error:
-                print(f"Error bulk deleting files from storage: {str(storage_error)}")
-                failed_files = storage_paths
-        
-        # Delete from database
-        delete_result = supabase.table('submissions').delete().in_('id', submission_ids).execute()
-        
-        deleted_count = len(delete_result.data) if delete_result.data else 0
-        
-        return jsonify({
-            'success': True,
-            'message': f'Đã xóa {deleted_count} submissions thành công',
-            'deleted_count': deleted_count,
-            'deleted_files': len(deleted_files),
-            'failed_files': len(failed_files),
-            'storage_errors': failed_files if failed_files else None
-        })
-        
-    except Exception as e:
-        print(f"Error in bulk_delete_submissions: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': f'Lỗi xóa submissions: {str(e)}'
-        }), 500
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
