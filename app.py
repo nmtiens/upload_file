@@ -517,6 +517,7 @@ def upload_file():
         logger.error(f"Upload error: {str(e)}")
         return jsonify({'error': f'Lỗi: {str(e)}'}), 500
     
+    
 def get_all_storage_files(supabase, bucket_name, path="", max_files=5000):
     """
     Lấy tất cả files trong storage một cách recursive
