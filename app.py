@@ -2,17 +2,23 @@
 import hashlib
 import json
 import logging
-import re
+import tempfile
+import re  # Thêm import re cho hàm secure_folder_name
+from typing import Optional
 from flask import Flask, request, render_template, jsonify, send_file, abort
 import os
 from urllib.parse import unquote
 from datetime import datetime
 # Sử dụng: datetime.now()
+import pytz
 from werkzeug.utils import secure_filename
 import math
 from pathlib import Path
 import platform
-import io
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+
 import uuid
 from supabase import create_client, Client  
 import zipfile
@@ -140,8 +146,10 @@ else:
         DEMO_MODE = True
 # Cache để tránh gọi API nhiều lần
 
-# Cấu hình app - TỪ 16MB lên 100MB để hỗ trợ file Word lớn
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
+
+
+# Cấu hình app
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # In thông tin khởi động
 print(f"=== FILE UPLOAD SERVER ===")
@@ -189,82 +197,29 @@ def init_db():
 
 init_db()
 
-# Mở rộng ALLOWED_EXTENSIONS để hỗ trợ đầy đủ các format Word và Office
-ALLOWED_EXTENSIONS = {
-    'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg',
-    'doc', 'docx', 'docm', 'dot', 'dotx', 'dotm',  # Word files
-    'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'xltm',  # Excel files
-    'ppt', 'pptx', 'pptm', 'pot', 'potx', 'potm',  # PowerPoint files
-    'zip', 'rar', '7z', 'tar', 'gz',  # Archive files
-    'mp3', 'mp4', 'avi', 'mov', 'wmv',  # Media files
-    'csv', 'json', 'xml'  # Data files
-}
+ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'doc', 'docx', 'xls', 'xlsx', 'zip', 'rar', '7z'}
 
 def allowed_file(filename):
-    """Kiểm tra file có được phép upload không"""
-    if not filename or '.' not in filename:
-        return False
-    
-    extension = filename.rsplit('.', 1)[1].lower()
-    is_allowed = extension in ALLOWED_EXTENSIONS
-    
-    # Log để debug
-    logger.info(f"Checking file: {filename}, extension: {extension}, allowed: {is_allowed}")
-    
-    return is_allowed
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def get_content_type(filename):
-    """Xác định content-type cho file"""
+def secure_filename_vietnamese(filename):
+    """
+    Chuyển đổi tên file thành format an toàn, hỗ trợ tiếng Việt
+    """
     if not filename:
-        return "application/octet-stream"
+        return filename
     
-    extension = filename.rsplit('.', 1)[1].lower() if '.' in filename else ""
+    # Tách tên file và extension
+    name, ext = os.path.splitext(filename)
     
-    content_types = {
-        # Microsoft Office
-        'doc': 'application/msword',
-        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'docm': 'application/vnd.ms-word.document.macroEnabled.12',
-        'dot': 'application/msword',
-        'dotx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
-        'dotm': 'application/vnd.ms-word.template.macroEnabled.12',
-        
-        'xls': 'application/vnd.ms-excel',
-        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
-        
-        'ppt': 'application/vnd.ms-powerpoint',
-        'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        'pptm': 'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
-        
-        # Other common types
-        'pdf': 'application/pdf',
-        'txt': 'text/plain',
-        'csv': 'text/csv',
-        'json': 'application/json',
-        'xml': 'application/xml',
-        
-        # Images
-        'jpg': 'image/jpeg',
-        'jpeg': 'image/jpeg',
-        'png': 'image/png',
-        'gif': 'image/gif',
-        'bmp': 'image/bmp',
-        'svg': 'image/svg+xml',
-        
-        # Archives
-        'zip': 'application/zip',
-        'rar': 'application/x-rar-compressed',
-        '7z': 'application/x-7z-compressed',
-        
-        # Media
-        'mp3': 'audio/mpeg',
-        'mp4': 'video/mp4',
-        'avi': 'video/x-msvideo',
-        'mov': 'video/quicktime',
-    }
+    # Sử dụng hàm secure_folder_name để xử lý phần tên
+    safe_name = secure_folder_name(name)
     
-    return content_types.get(extension, "application/octet-stream")
+    if not safe_name:
+        # Fallback nếu không xử lý được
+        safe_name = secure_filename(name)
+    
+    return f"{safe_name}{ext}"
 
 def get_client_ip():
     """Lấy IP client"""
@@ -273,13 +228,28 @@ def get_client_ip():
     else:
         return request.environ['HTTP_X_FORWARDED_FOR']
 
+def calculate_file_checksum(file_path: Path) -> Optional[str]:
+    """Tính MD5 checksum của file"""
+    try:
+        hash_md5 = hashlib.md5()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_md5.update(chunk)
+        return hash_md5.hexdigest()
+    except Exception:
+        return None
+
+
+
+
 def upload_to_supabase(file, folder_name=None):
-    """Upload file lên Supabase Storage"""
+    """Upload file lên Supabase Storage - Enhanced version with better error handling"""
+    
     if DEMO_MODE:
         # Mô phỏng upload thành công
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         unique_id = str(uuid.uuid4())[:8]
-        original_name = secure_filename(file.filename)
+        original_name = secure_filename_vietnamese(file.filename)
         name, ext = os.path.splitext(original_name)
         file_name = f"{name}_{timestamp}_{unique_id}{ext}"
         
@@ -293,14 +263,14 @@ def upload_to_supabase(file, folder_name=None):
             'file_name': file_name,
             'storage_path': storage_path,
             'file_url': f"https://demo.example.com/{storage_path}",
-            'file_size': 1024  # Giả lập 1KB
+            'file_size': 1024
         }
     
     try:
         # Tạo tên file unique
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         unique_id = str(uuid.uuid4())[:8]
-        original_name = secure_filename(file.filename)
+        original_name = secure_filename_vietnamese(file.filename)
         name, ext = os.path.splitext(original_name)
         file_name = f"{name}_{timestamp}_{unique_id}{ext}"
         
@@ -310,66 +280,159 @@ def upload_to_supabase(file, folder_name=None):
         else:
             storage_path = file_name
         
-        # QUAN TRỌNG: Reset file pointer về đầu trước khi đọc
-        file.seek(0)
-        
         # Đọc file content
+        file.seek(0)  # Reset file pointer
         file_content = file.read()
         file_size = len(file_content)
         
-        # Xác định content-type chính xác
-        content_type = get_content_type(original_name)
-        
-        logger.info(f"Uploading file: {file_name}, size: {file_size}, content-type: {content_type}")
-        
-        # Upload lên Supabase Storage
-        result = supabase.storage.from_(SUPABASE_BUCKET).upload(
-            path=storage_path,
-            file=file_content,
-            file_options={
-                "content-type": content_type,
-                "cache-control": "3600",
-                "upsert": "false"  # Không ghi đè file cùng tên
-            }
-        )
-        
-        # Kiểm tra kết quả upload
-        if hasattr(result, 'status_code'):
-            status_code = result.status_code
-        elif hasattr(result, 'data') and result.data:
-            status_code = 200  # Thành công
-        else:
-            status_code = 400  # Lỗi
-        
-        if status_code == 200 or (hasattr(result, 'data') and result.data):
-            # Lấy public URL
-            public_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(storage_path)
-            
-            logger.info(f"Upload successful: {storage_path}")
-            
-            return {
-                'success': True,
-                'file_name': file_name,
-                'storage_path': storage_path,
-                'file_url': public_url,
-                'file_size': file_size
-            }
-        else:
-            error_msg = f"Upload failed with status: {status_code}"
-            if hasattr(result, 'error') and result.error:
-                error_msg += f" - {result.error}"
-            
-            logger.error(error_msg)
+        if file_size == 0:
             return {
                 'success': False,
-                'error': error_msg
+                'error': "File is empty"
+            }
+        
+        # Kiểm tra kết nối Supabase
+        if not supabase:
+            return {
+                'success': False,
+                'error': "Supabase client not initialized"
+            }
+        
+        # Upload lên Supabase Storage - Enhanced version
+        try:
+            # Reset file pointer again before upload
+            file.seek(0)
+            
+            # Attempt upload with different approaches
+            storage_client = supabase.storage.from_(SUPABASE_BUCKET)
+            
+            # Method 1: Direct upload with file object
+            try:
+                result = storage_client.upload(
+                    path=storage_path,
+                    file=file_content,
+                    file_options={
+                        "content-type": file.content_type or "application/octet-stream",
+                        "upsert": "false"  # Prevent overwrite
+                    }
+                )
+                
+                # Debug: Log the result structure
+                logging.debug(f"Upload result type: {type(result)}")
+                logging.debug(f"Upload result: {result}")
+                
+                # Enhanced response parsing
+                success = False
+                error_msg = None
+                
+                # Case 1: New supabase-py version (dict response)
+                if isinstance(result, dict):
+                    if result.get('error'):
+                        error_msg = str(result['error'])
+                    elif result.get('data') or 'path' in result:
+                        success = True
+                    else:
+                        error_msg = "Unknown dict response format"
+                
+                # Case 2: Object with attributes
+                elif hasattr(result, 'data') and hasattr(result, 'error'):
+                    if result.error:
+                        error_msg = str(result.error)
+                    elif result.data:
+                        success = True
+                    else:
+                        error_msg = "No data in response"
+                
+                # Case 3: Direct success (some versions return path directly)
+                elif isinstance(result, str):
+                    success = True
+                
+                # Case 4: Other object types
+                else:
+                    # Try to convert to dict
+                    try:
+                        result_dict = result.__dict__ if hasattr(result, '__dict__') else {}
+                        if result_dict.get('data') or result_dict.get('path'):
+                            success = True
+                        else:
+                            error_msg = f"Unknown response object: {type(result)}"
+                    except:
+                        error_msg = f"Cannot parse response type: {type(result)}"
+                
+                if success:
+                    # Get public URL
+                    try:
+                        public_url_result = storage_client.get_public_url(storage_path)
+                        
+                        # Handle different URL response formats
+                        if isinstance(public_url_result, str):
+                            file_url = public_url_result
+                        elif isinstance(public_url_result, dict):
+                            file_url = public_url_result.get('publicUrl') or public_url_result.get('url')
+                        elif hasattr(public_url_result, 'publicUrl'):
+                            file_url = public_url_result.publicUrl
+                        else:
+                            file_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{storage_path}"
+                        
+                        return {
+                            'success': True,
+                            'file_name': file_name,
+                            'storage_path': storage_path,
+                            'file_url': file_url,
+                            'file_size': file_size
+                        }
+                    except Exception as url_error:
+                        # Upload succeeded but URL generation failed
+                        fallback_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{storage_path}"
+                        return {
+                            'success': True,
+                            'file_name': file_name,
+                            'storage_path': storage_path,
+                            'file_url': fallback_url,
+                            'file_size': file_size,
+                            'warning': f"URL generation warning: {str(url_error)}"
+                        }
+                else:
+                    return {
+                        'success': False,
+                        'error': f"Upload failed: {error_msg or 'Unknown error'}"
+                    }
+                    
+            except Exception as upload_error:
+                error_str = str(upload_error)
+                
+                # Handle specific Supabase errors
+                if "already exists" in error_str.lower():
+                    return {
+                        'success': False,
+                        'error': "File already exists. Please try again."
+                    }
+                elif "permission" in error_str.lower():
+                    return {
+                        'success': False,
+                        'error': "Permission denied. Check bucket policies."
+                    }
+                elif "size" in error_str.lower():
+                    return {
+                        'success': False,
+                        'error': f"File size error: {error_str}"
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': f"Upload exception: {error_str}"
+                    }
+                    
+        except Exception as storage_error:
+            return {
+                'success': False,
+                'error': f"Storage client error: {str(storage_error)}"
             }
             
     except Exception as e:
-        logger.error(f"Upload exception: {str(e)}")
         return {
             'success': False,
-            'error': str(e)
+            'error': f"General error: {str(e)}"
         }
 
 @app.route('/')
@@ -433,13 +496,7 @@ def upload_file():
         # Xử lý file upload
         if 'file' in request.files:
             file = request.files['file']
-            
-            # Kiểm tra file có tồn tại và có tên không
-            if not file or not file.filename or not file.filename.strip():
-                logger.info("No file selected for upload")
-            else:
-                logger.info(f"Processing file: {file.filename}")
-                
+            if file and hasattr(file, 'filename') and file.filename and file.filename.strip():
                 if allowed_file(file.filename):
                     # Upload lên Supabase (hoặc mô phỏng)
                     upload_result = upload_to_supabase(file, final_folder_name)
@@ -451,13 +508,11 @@ def upload_file():
                         storage_path = upload_result['storage_path']
                         
                         status_text = "Demo upload" if DEMO_MODE else "Uploaded to Supabase"
-                        logger.info(f"{status_text}: {storage_path} ({format_file_size(file_size)}) from IP: {client_ip}")
+                        print(f"{status_text}: {storage_path} ({format_file_size(file_size)}) from IP: {client_ip}")
                     else:
-                        logger.error(f"Upload failed: {upload_result['error']}")
                         return jsonify({'error': f'Lỗi upload: {upload_result["error"]}'}), 500
                 else:
-                    logger.warning(f"File type not allowed: {file.filename}")
-                    return jsonify({'error': f'Loại file không được hỗ trợ. Các định dạng được hỗ trợ: {", ".join(sorted(ALLOWED_EXTENSIONS))}'}), 400
+                    return jsonify({'error': 'Loại file không được hỗ trợ'}), 400
 
         # Lưu vào database (hoặc mô phỏng)
         try:
@@ -480,12 +535,12 @@ def upload_file():
             
             if not DEMO_MODE:
                 result = supabase.table('submissions').insert(submission_data).execute()
-                logger.info(f"Data saved to Supabase database")
+                print(f"Data saved to Supabase database: {result}")
             else:
-                logger.info(f"Demo mode - would save: {submission_data}")
+                print(f"Demo mode - would save: {submission_data}")
             
         except Exception as e:
-            logger.error(f"Database error: {str(e)}")
+            print(f"Database error: {str(e)}")
             if not DEMO_MODE:
                 return jsonify({'error': f'Lỗi lưu database: {str(e)}'}), 500
 
@@ -506,7 +561,7 @@ def upload_file():
             'file_name': file_name,
             'file_url': file_url,
             'file_size': file_size,
-            'file_size_human': format_file_size(file_size) if file_size else "0 B",
+            'file_size_human': format_file_size(file_size),
             'folder': final_folder_name,
             'storage_path': storage_path,
             'client_ip': client_ip,
@@ -514,10 +569,648 @@ def upload_file():
         })
 
     except Exception as e:
-        logger.error(f"Upload error: {str(e)}")
+        print(f"Upload error: {str(e)}")
         return jsonify({'error': f'Lỗi: {str(e)}'}), 500
+
+def list_files_only_recursive(bucket_name, folder_path=""):
+    """
+    Chỉ lấy danh sách FILE, KHÔNG bao gồm folder
+    Được thiết kế đặc biệt để tránh xóa nhầm folder
+    """
+    if DEMO_MODE:
+        return []
     
+    try:
+        files_only = []
+        
+        # Lấy danh sách items trong folder hiện tại
+        result = supabase.storage.from_(bucket_name).list(folder_path)
+        
+        if not result:
+            return files_only
+            
+        for item in result:
+            item_name = item.get('name', '')
+            if not item_name:
+                continue
+                
+            # Tạo full path
+            if folder_path:
+                full_path = f"{folder_path}/{item_name}"
+            else:   
+                full_path = item_name
+            
+            # LOGIC CHẶT CHẼ để chỉ lấy FILE
+            item_id = item.get('id')
+            item_size = item.get('size')
+            item_mimetype = item.get('mimetype') 
+            
+            # File phải có ít nhất 1 trong các đặc điểm này:
+            # 1. Có ID (Supabase tự generate cho file)
+            # 2. Có size > 0 
+            # 3. Có mimetype
+            # 4. Có extension rõ ràng
+            has_clear_extension = (
+                '.' in item_name and 
+                not item_name.startswith('.') and
+                len(item_name.split('.')[-1]) <= 10  # Extension hợp lệ
+            )
+            
+            is_definitely_file = (
+                (item_id is not None) or 
+                (item_size is not None and item_size > 0) or 
+                (item_mimetype is not None and item_mimetype.strip() != '') or
+                has_clear_extension
+            )
+            
+            # QUAN TRỌNG: Chỉ xử lý nếu chắc chắn là FILE
+            if is_definitely_file:
+                files_only.append({
+                    'name': item_name,
+                    'path': full_path,
+                    'type': 'file',
+                    'size': item_size or 0,
+                    'mimetype': item_mimetype or '',
+                    'last_modified': item.get('updated_at', item.get('created_at', '')),
+                    'metadata': item
+                })
+                logger.debug(f"✓ Detected FILE: {full_path} (size: {item_size}, mimetype: {item_mimetype})")
+            else:
+                # Đây có thể là folder - Đệ quy để tìm file bên trong
+                # NHƯNG KHÔNG thêm folder vào danh sách
+                logger.debug(f"📁 Detected FOLDER: {full_path} - exploring inside...")
+                try:
+                    subfolder_files = list_files_only_recursive(bucket_name, full_path)
+                    files_only.extend(subfolder_files)
+                except Exception as subfolder_error:
+                    logger.warning(f"Cannot explore subfolder {full_path}: {str(subfolder_error)}")
+        
+        return files_only
+        
+    except Exception as e:
+        logger.error(f"Error listing files in {folder_path}: {str(e)}")
+        return []
+
+def delete_only_files_safe(bucket_name, file_items, batch_size=5):
+    """
+    An toàn chỉ xóa FILE, tuyệt đối không xóa folder
+    """
+    if DEMO_MODE:
+        return {'deleted': len(file_items), 'failed': 0, 'errors': []}
     
+    deleted_count = 0
+    failed_count = 0
+    errors = []
+    
+    logger.info(f"🎯 Starting SAFE file deletion for {len(file_items)} files...")
+    
+    # Xử lý từng file một cách cẩn thận
+    for i, file_item in enumerate(file_items):
+        file_path = file_item['path']
+        file_name = file_item['name']
+        
+        try:
+            # KIỂM TRA CUỐI CÙNG: Đây có phải file không?
+            if not file_name or '.' not in file_name:
+                logger.warning(f"⚠️ SKIP suspicious path (no extension): {file_path}")
+                continue
+                
+            # Kiểm tra extension hợp lệ
+            extension = file_name.split('.')[-1].lower()
+            valid_extensions = [
+                'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',  # Images
+                'pdf', 'doc', 'docx', 'txt', 'rtf',  # Documents  
+                'xls', 'xlsx', 'csv',  # Spreadsheets
+                'mp4', 'avi', 'mov', 'wmv', 'flv',  # Videos
+                'mp3', 'wav', 'flac', 'aac',  # Audio
+                'zip', 'rar', '7z', 'tar', 'gz',  # Archives
+                'json', 'xml', 'html', 'css', 'js', 'py', 'java', 'cpp'  # Code
+            ]
+            
+            if extension not in valid_extensions:
+                logger.warning(f"⚠️ SKIP unknown extension: {file_path} (.{extension})")
+                continue
+            
+            logger.info(f"🗑️ Deleting file [{i+1}/{len(file_items)}]: {file_path}")
+            
+            # Thực hiện xóa file
+            result = supabase.storage.from_(bucket_name).remove([file_path])
+            
+            if result:
+                deleted_count += 1
+                logger.info(f"✅ Successfully deleted: {file_path}")
+            else:
+                deleted_count += 1  # Coi như thành công nếu không có error
+                logger.info(f"✅ File processed (may already be deleted): {file_path}")
+                
+        except Exception as file_error:
+            error_str = str(file_error).lower()
+            if any(keyword in error_str for keyword in ['not found', 'does not exist', 'not exist']):
+                deleted_count += 1
+                logger.info(f"✅ File already deleted: {file_path}")
+            else:
+                failed_count += 1
+                error_msg = f"❌ Failed to delete {file_path}: {str(file_error)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+        
+        # Delay để tránh rate limit
+        if (i + 1) % batch_size == 0 and (i + 1) < len(file_items):
+            time.sleep(1)
+            logger.info(f"⏳ Processed {i + 1}/{len(file_items)} files...")
+    
+    return {
+        'deleted': deleted_count,
+        'failed': failed_count,
+        'errors': errors
+    }
+
+@app.route('/api/storage/cleanup-files-only', methods=['POST'])
+def cleanup_files_only():
+    """API để CHỈ XÓA FILE - TUYỆT ĐỐI KHÔNG XÓA THƯ MỤC"""
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': True,
+                'message': '🔧 Demo mode: Mô phỏng xóa files (thư mục được bảo vệ)',
+                'demo_mode': True,
+                'total_files': 0,
+                'deleted': 0,
+                'failed': 0,
+                'errors': []
+            })
+        
+        client_ip = get_client_ip()
+        logger.warning(f"🛡️ SAFE FILES-ONLY CLEANUP initiated from IP: {client_ip}")
+        
+        # Sử dụng hàm mới chỉ lấy file
+        logger.info("📋 Scanning for FILES ONLY (folders are protected)...")
+        file_items = list_files_only_recursive(SUPABASE_BUCKET)
+        
+        if not file_items:
+            return jsonify({
+                'success': True,
+                'message': '✅ Không tìm thấy file nào để xóa (thư mục được bảo vệ)',
+                'total_files': 0,
+                'deleted': 0,
+                'failed': 0,
+                'errors': []
+            })
+        
+        total_files = len(file_items)
+        total_size = sum(item.get('size', 0) for item in file_items)
+        
+        logger.info(f"📊 Found {total_files} FILES to delete")
+        logger.info(f"📦 Total size: {format_file_size(total_size)}")
+        logger.info(f"🛡️ ALL FOLDERS WILL BE PROTECTED")
+        
+        # Log một vài file đầu để kiểm tra
+        logger.info("📋 Sample files to delete:")
+        for i, item in enumerate(file_items[:5]):
+            logger.info(f"  {i+1}. {item['path']} ({format_file_size(item.get('size', 0))})")
+        if len(file_items) > 5:
+            logger.info(f"  ... and {len(file_items) - 5} more files")
+        
+        # Thực hiện xóa AN TOÀN
+        logger.info("🚀 Starting PROTECTED file deletion...")
+        delete_result = delete_only_files_safe(SUPABASE_BUCKET, file_items)
+        
+        # Xóa database records (optional)
+        db_deleted = 0
+        try:
+            db_result = supabase.table('submissions').delete().neq('id', 0).execute()
+            db_deleted = len(db_result.data) if db_result.data else 0
+            logger.info(f"🗄️ Cleaned {db_deleted} database records")
+        except Exception as e:
+            logger.warning(f"⚠️ Database cleanup failed: {str(e)}")
+        
+        # Kết quả
+        success_rate = (delete_result['deleted'] / total_files * 100) if total_files > 0 else 100
+        
+        message = f"🛡️ ĐÃ XÓA {delete_result['deleted']}/{total_files} FILE - THƯ MỤC ĐƯỢC BẢO VỆ"
+        if delete_result['failed'] > 0:
+            message += f" (❌ {delete_result['failed']} lỗi)"
+        if db_deleted > 0:
+            message += f" (🗄️ DB: {db_deleted} records)"
+        
+        logger.warning(f"🛡️ PROTECTED CLEANUP COMPLETED: {message}")
+        
+        return jsonify({
+            'success': True,
+            'message': message,
+            'total_files': total_files,
+            'total_size': total_size,
+            'total_size_human': format_file_size(total_size),
+            'deleted': delete_result['deleted'],
+            'failed': delete_result['failed'],
+            'database_records_deleted': db_deleted,
+            'success_rate': round(success_rate, 2),
+            'errors': delete_result['errors'][:10],
+            'client_ip': client_ip,
+            'cleanup_type': 'files_only_protected',
+            'folders_protected': True,
+            'note': '🛡️ Tất cả thư mục được bảo vệ hoàn toàn - chỉ xóa file'
+        })
+        
+    except Exception as e:
+        error_msg = f"🛡️ Protected cleanup error: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500
+
+def list_all_items_with_type(bucket_name, folder_path=""):
+    """
+    Lấy tất cả items và phân loại rõ ràng file vs folder
+    Dùng cho storage info và full cleanup
+    """
+    if DEMO_MODE:
+        return []
+    
+    try:
+        all_items = []
+        
+        result = supabase.storage.from_(bucket_name).list(folder_path)
+        if not result:
+            return all_items
+            
+        for item in result:
+            item_name = item.get('name', '')
+            if not item_name:
+                continue
+                
+            if folder_path:
+                full_path = f"{folder_path}/{item_name}"
+            else:   
+                full_path = item_name
+            
+            # Phân loại dựa trên metadata Supabase
+            item_id = item.get('id')
+            item_size = item.get('size')
+            item_mimetype = item.get('mimetype')
+            
+            # File: có metadata rõ ràng hoặc có extension
+            is_file = (
+                item_id is not None or 
+                (item_size is not None and item_size > 0) or 
+                (item_mimetype is not None and item_mimetype.strip() != '') or
+                ('.' in item_name and not item_name.startswith('.') and not item_name.endswith('/'))
+            )
+            
+            if is_file:
+                all_items.append({
+                    'name': item_name,
+                    'path': full_path,
+                    'type': 'file',
+                    'size': item_size or 0,
+                    'mimetype': item_mimetype or '',
+                    'last_modified': item.get('updated_at', item.get('created_at', '')),
+                    'metadata': item
+                })
+                logger.debug(f"✓ Detected FILE: {full_path}")
+            else:
+                # Folder - thêm vào danh sách
+                all_items.append({
+                    'name': item_name,
+                    'path': full_path,
+                    'type': 'folder',
+                    'size': 0,
+                    'last_modified': item.get('updated_at', item.get('created_at', '')),
+                    'metadata': item
+                })
+                logger.debug(f"📁 Detected FOLDER: {full_path}")
+                
+                # Đệ quy vào folder
+                try:
+                    subfolder_items = list_all_items_with_type(bucket_name, full_path)
+                    all_items.extend(subfolder_items)
+                except Exception as e:
+                    logger.warning(f"Cannot access subfolder {full_path}: {str(e)}")
+        
+        return all_items
+        
+    except Exception as e:
+        logger.error(f"Error listing items in {folder_path}: {str(e)}")
+        return []
+
+def delete_items_batch(bucket_name, items_to_delete, batch_size=10):
+    """
+    Xóa items theo batch để tránh timeout và rate limit
+    """
+    if not items_to_delete:
+        return {'deleted': 0, 'failed': 0, 'errors': []}
+    
+    deleted_count = 0
+    failed_count = 0
+    errors = []
+    
+    # Chia thành các batch nhỏ
+    for i in range(0, len(items_to_delete), batch_size):
+        batch = items_to_delete[i:i + batch_size]
+        batch_paths = [item['path'] for item in batch]
+        
+        try:
+            logger.info(f"🗑️ Deleting batch {i//batch_size + 1}: {len(batch_paths)} items")
+            logger.debug(f"Batch paths: {batch_paths}")
+            
+            # Xóa theo batch
+            result = supabase.storage.from_(bucket_name).remove(batch_paths)
+            
+            # Kiểm tra kết quả
+            if result:
+                # Nếu có kết quả trả về, kiểm tra từng item
+                if isinstance(result, list):
+                    for idx, res in enumerate(result):
+                        if res.get('error'):
+                            error_msg = res.get('error', {}).get('message', 'Unknown error')
+                            if 'not found' in error_msg.lower() or 'does not exist' in error_msg.lower():
+                                deleted_count += 1
+                                logger.info(f"✅ Item already deleted: {batch_paths[idx]}")
+                            else:
+                                failed_count += 1
+                                errors.append(f"❌ {batch_paths[idx]}: {error_msg}")
+                                logger.error(f"❌ Failed to delete {batch_paths[idx]}: {error_msg}")
+                        else:
+                            deleted_count += 1
+                            logger.info(f"✅ Successfully deleted: {batch_paths[idx]}")
+                else:
+                    # Nếu không có error, coi như tất cả đã xóa thành công
+                    deleted_count += len(batch_paths)
+                    logger.info(f"✅ Batch deleted successfully: {len(batch_paths)} items")
+            else:
+                # Nếu không có result, coi như thành công
+                deleted_count += len(batch_paths)
+                logger.info(f"✅ Batch processed: {len(batch_paths)} items")
+                
+        except Exception as e:
+            error_str = str(e).lower()
+            # Xử lý từng item trong batch khi có lỗi
+            for path in batch_paths:
+                if any(keyword in error_str for keyword in ['not found', 'does not exist', 'not exist']):
+                    deleted_count += 1
+                    logger.info(f"✅ Item already deleted: {path}")
+                else:
+                    failed_count += 1
+                    error_msg = f"❌ Failed to delete {path}: {str(e)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+        
+        # Delay giữa các batch
+        if i + batch_size < len(items_to_delete):
+            time.sleep(0.5)
+            logger.info(f"⏳ Processed {min(i + batch_size, len(items_to_delete))}/{len(items_to_delete)} items...")
+    
+    return {
+        'deleted': deleted_count,
+        'failed': failed_count,
+        'errors': errors
+    }
+@app.route('/api/storage/cleanup', methods=['POST'])
+def cleanup_storage():
+    """API để dọn dẹp tất cả file VÀ thư mục - FIXED VERSION"""
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': True,
+                'message': '🔧 Demo mode: Mô phỏng xóa tất cả',
+                'demo_mode': True,
+                'total_items': 0,
+                'deleted': 0,
+                'failed': 0,
+                'errors': []
+            })
+        
+        client_ip = get_client_ip()
+        logger.warning(f"💥 FULL STORAGE CLEANUP initiated from IP: {client_ip}")
+        
+        # Lấy tất cả items
+        logger.info("📋 Scanning ALL items (files + folders)...")
+        all_items = list_all_items_with_type(SUPABASE_BUCKET)
+        
+        if not all_items:
+            return jsonify({
+                'success': True,
+                'message': '✅ Storage đã trống',
+                'total_items': 0,
+                'deleted': 0,
+                'failed': 0,
+                'errors': []
+            })
+        
+        # Phân loại
+        files = [item for item in all_items if item['type'] == 'file']
+        folders = [item for item in all_items if item['type'] == 'folder']
+        
+        total_files = len(files)
+        total_folders = len(folders)
+        total_size = sum(item.get('size', 0) for item in files)
+        
+        logger.info(f"💥 FULL CLEANUP TARGET:")
+        logger.info(f"   📄 Files: {total_files}")
+        logger.info(f"   📁 Folders: {total_folders}")
+        logger.info(f"   💾 Total size: {format_file_size(total_size)}")
+        
+        # Log sample items
+        logger.info("📋 Sample items to delete:")
+        sample_files = files[:3]
+        sample_folders = folders[:3]
+        for i, item in enumerate(sample_files):
+            logger.info(f"  📄 {i+1}. {item['path']} ({format_file_size(item.get('size', 0))})")
+        for i, item in enumerate(sample_folders):
+            logger.info(f"  📁 {i+1}. {item['path']}")
+        
+        # STRATEGY: Xóa TẤT CẢ cùng lúc (files + folders)
+        # Sắp xếp theo độ sâu (deep first) để tránh lỗi folder không rỗng
+        all_items_sorted = sorted(all_items, key=lambda x: (
+            x['path'].count('/'),  # Độ sâu
+            x['type'] == 'folder'  # File trước, folder sau
+        ), reverse=True)
+        
+        logger.info(f"🚀 Starting FULL deletion of {len(all_items_sorted)} items...")
+        logger.info("📋 Deletion order (deep-first):")
+        for i, item in enumerate(all_items_sorted[:5]):
+            logger.info(f"  {i+1}. [{item['type'].upper()}] {item['path']}")
+        
+        # Thực hiện xóa
+        delete_result = delete_items_batch(SUPABASE_BUCKET, all_items_sorted, batch_size=8)
+        
+        # Database cleanup
+        db_deleted = 0
+        try:
+            logger.info("🗄️ Cleaning database records...")
+            db_result = supabase.table('submissions').delete().neq('id', 0).execute()
+            db_deleted = len(db_result.data) if db_result.data else 0
+            logger.info(f"🗄️ Cleaned {db_deleted} database records")
+        except Exception as e:
+            logger.warning(f"⚠️ Database cleanup failed: {str(e)}")
+        
+        # Kết quả
+        total_items = total_files + total_folders
+        success_rate = (delete_result['deleted'] / total_items * 100) if total_items > 0 else 100
+        
+        message = f"💥 XÓA {delete_result['deleted']}/{total_items} items"
+        message += f" ({total_files} files + {total_folders} folders)"
+        if delete_result['failed'] > 0:
+            message += f" (❌ {delete_result['failed']} lỗi)"
+        if db_deleted > 0:
+            message += f" (🗄️ DB: {db_deleted})"
+        
+        logger.warning(f"💥 FULL CLEANUP COMPLETED: {message}")
+        logger.info(f"📊 Success rate: {success_rate:.1f}%")
+        
+        return jsonify({
+            'success': True,
+            'message': message,
+            'total_items': total_items,
+            'total_files': total_files,
+            'total_folders': total_folders,
+            'total_size': total_size,
+            'total_size_human': format_file_size(total_size),
+            'deleted': delete_result['deleted'],
+            'failed': delete_result['failed'],
+            'database_records_deleted': db_deleted,
+            'success_rate': round(success_rate, 2),
+            'errors': delete_result['errors'][:15],
+            'client_ip': client_ip,
+            'cleanup_type': 'full',
+            'strategy': 'deep_first_batch_delete'
+        })
+        
+    except Exception as e:
+        error_msg = f"💥 Full cleanup error: {str(e)}"
+        logger.error(error_msg)
+        logger.exception("Full cleanup exception details:")
+        return jsonify({
+            'success': False,
+            'error': error_msg,
+            'cleanup_type': 'full'
+        }), 500
+
+
+@app.route('/api/storage/info', methods=['GET'])
+def storage_info():
+    """Thông tin storage với phân loại chính xác"""
+    try:
+        if DEMO_MODE:
+            return jsonify({
+                'success': True,
+                'demo_mode': True,
+                'total_files': 0,
+                'total_folders': 0,
+                'total_size': 0,
+                'message': '🔧 Demo mode'
+            })
+
+        all_items = list_all_items_with_type(SUPABASE_BUCKET)
+        
+        files = [item for item in all_items if item['type'] == 'file']
+        folders = [item for item in all_items if item['type'] == 'folder']
+
+        total_files = len(files)
+        total_folders = len(folders)
+        total_size = sum(file.get('size', 0) for file in files)
+
+        # Folder stats
+        folder_stats = {}
+        for file in files:
+            folder_name = file['path'].split('/')[0] if '/' in file['path'] else 'root'
+            if folder_name not in folder_stats:
+                folder_stats[folder_name] = {'count': 0, 'size': 0}
+            folder_stats[folder_name]['count'] += 1
+            folder_stats[folder_name]['size'] += file.get('size', 0)
+
+        folder_list = [
+            {
+                'name': name,
+                'file_count': stats['count'],
+                'total_size': stats['size'],
+                'size_human': format_file_size(stats['size'])
+            }
+            for name, stats in folder_stats.items()
+        ]
+        folder_list.sort(key=lambda x: x['total_size'], reverse=True)
+
+        # File types
+        file_types = {}
+        for file in files:
+            if '.' in file['path']:
+                ext = file['path'].split('.')[-1].lower()
+                if ext not in file_types:
+                    file_types[ext] = {'count': 0, 'size': 0}
+                file_types[ext]['count'] += 1
+                file_types[ext]['size'] += file.get('size', 0)
+
+        return jsonify({
+            'success': True,
+            'total_files': total_files,
+            'total_folders': total_folders,
+            'total_items': total_files + total_folders,
+            'total_size': total_size,
+            'total_size_human': format_file_size(total_size),
+            'folder_stats': folder_list,
+            'bucket': SUPABASE_BUCKET,
+            'recent_files': sorted(files, key=lambda x: x.get('last_modified', ''), reverse=True)[:10],
+            'file_types': file_types,
+            'cleanup_options': {
+                'files_only': '🛡️ Xóa chỉ file - Bảo vệ thư mục',
+                'full': '💥 Xóa tất cả file và thư mục'
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/storage/cleanup-files-confirm', methods=['POST']) 
+def cleanup_files_confirm():
+    """Xác nhận trước khi xóa chỉ file (BẢO VỆ thư mục)"""
+    try:
+        confirm_code = request.json.get('confirm_code', '') if request.is_json else ''
+        expected_code = "DELETE_FILES_KEEP_FOLDERS"
+        
+        if confirm_code != expected_code:
+            return jsonify({
+                'success': False,
+                'error': f'❌ Nhập mã xác nhận: "{expected_code}"',
+                'required_code': expected_code,
+                'note': '🛡️ Thao tác này CHỈ xóa file - THƯ MỤC ĐƯỢC BẢO VỆ'
+            }), 400
+        
+        logger.info("🛡️ Confirmed: FILES-ONLY cleanup (folders protected)")
+        return cleanup_files_only()
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/storage/cleanup-confirm', methods=['POST']) 
+def cleanup_confirm():
+    """Xác nhận trước khi xóa tất cả"""
+    try:
+        confirm_code = request.json.get('confirm_code', '') if request.is_json else ''
+        expected_code = "DELETE_ALL_FILES_AND_FOLDERS"
+        
+        if confirm_code != expected_code:
+            return jsonify({
+                'success': False,
+                'error': f'❌ Nhập mã xác nhận: "{expected_code}"',
+                'required_code': expected_code,
+                'note': '💥 Thao tác này XÓA TẤT CẢ'
+            }), 400
+        
+        logger.info("💥 Confirmed: FULL cleanup")
+        return cleanup_storage()
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 def get_all_storage_files(supabase, bucket_name, path="", max_files=5000):
     """
     Lấy tất cả files trong storage một cách recursive
