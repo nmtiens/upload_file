@@ -409,6 +409,71 @@
         SUPABASE_ANON_KEY
       );
 
+      // Hàm sanitize tên file để tránh lỗi với ký tự đặc biệt
+      function sanitizeFileName(fileName) {
+        const extension = fileName.split(".").pop();
+        const baseName = fileName.replace(/\.[^/.]+$/, "");
+
+        // Chuyển đổi ký tự tiếng Việt thành không dấu và xóa ký tự đặc biệt
+        const cleanBaseName = baseName
+          // Chuyển đổi ký tự tiếng Việt (giữ nguyên chữ hoa/thường)
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "") // Loại bỏ dấu
+          .replace(/đ/g, "d") // Chuyển đ thành d
+          .replace(/Đ/g, "D") // Chuyển Đ thành D
+          // Xóa ký tự đặc biệt (chỉ giữ lại chữ cái, số, dấu gạch dưới, dấu gạch ngang)
+          .replace(/[^a-zA-Z0-9_-]/g, "")
+          // Loại bỏ nhiều dấu gạch dưới hoặc gạch ngang liên tiếp
+          .replace(/[-_]+/g, (match) => match[0])
+          // Loại bỏ dấu gạch ở đầu và cuối
+          .replace(/^[-_]+|[-_]+$/g, "");
+
+        return cleanBaseName
+          ? `${cleanBaseName}.${extension}`
+          : `file.${extension}`;
+      }
+
+      // Hàm sanitize folder name
+      function sanitizeFolderName(folderName) {
+        return (
+          folderName
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "") // Loại bỏ dấu
+            .replace(/đ/g, "d")
+            .replace(/Đ/g, "D")
+            // Xóa ký tự đặc biệt (chỉ giữ lại chữ cái, số, dấu gạch dưới, dấu gạch ngang)
+            .replace(/[^a-zA-Z0-9_-]/g, "")
+            .replace(/[-_]+/g, (match) => match[0])
+            .replace(/^[-_]+|[-_]+$/g, "")
+        );
+      }
+
+      // Hàm tạo file path an toàn
+      function createSafeFilePath(folderName, fileName) {
+        const timestamp = new Date().getTime();
+        const randomStr = Math.random().toString(36).substring(2, 8);
+
+        // Sanitize tên file và folder
+        const safeFileName = sanitizeFileName(fileName);
+        const safeFolderName = sanitizeFolderName(folderName);
+
+        const extension = safeFileName.split(".").pop();
+        const baseName = safeFileName.replace(/\.[^/.]+$/, "");
+
+        // Tạo tên file unique
+        const uniqueFileName = `${baseName}_${timestamp}_${randomStr}.${extension}`;
+
+        // Tạo path hoàn toàn an toàn cho storage
+        const storagePath = `${safeFolderName}/${uniqueFileName}`;
+
+        return {
+          displayPath: `${folderName}/${fileName}`, // Path gốc để hiển thị
+          storagePath: storagePath, // Path an toàn cho storage
+          uniqueFileName: uniqueFileName,
+          originalFileName: fileName, // Tên file gốc
+        };
+      }
+
       // Hàm lấy folders từ database
       async function getFoldersFromDatabase() {
         try {
@@ -644,29 +709,26 @@
 
             progressFill.style.width = "30%";
 
-            // Tạo tên file unique để tránh trùng lặp
-            const timestamp = new Date().getTime();
-            const randomStr = Math.random().toString(36).substring(2, 8);
-            const fileExtension = file.name.split(".").pop();
-            const baseName = file.name.replace(/\.[^/.]+$/, ""); // Tên file không có extension
-            const uniqueFileName = `${baseName}_${timestamp}_${randomStr}.${fileExtension}`;
-            const fullFilePath = `${folderName}/${uniqueFileName}`;
+            // Tạo file path an toàn
+            const filePaths = createSafeFilePath(folderName, file.name);
 
             console.log("Uploading file:", {
               originalName: file.name,
-              uniqueName: uniqueFileName,
-              fullPath: fullFilePath,
+              displayPath: filePaths.displayPath,
+              storagePath: filePaths.storagePath,
+              uniqueName: filePaths.uniqueFileName,
               size: file.size,
               type: file.type,
+              folderName: folderName,
             });
 
-            // Upload file lên Supabase Storage với options cụ thể
+            // Upload file lên Supabase Storage với path đã được sanitize
             const { data: uploadData, error: uploadError } =
               await supabase.storage
                 .from(SUPABASE_BUCKET)
-                .upload(fullFilePath, file, {
+                .upload(filePaths.storagePath, file, {
                   cacheControl: "3600",
-                  upsert: false, // Không ghi đè file cũ
+                  upsert: false,
                   contentType: file.type || "application/octet-stream",
                 });
 
@@ -688,10 +750,11 @@
               minh_chung: formData.get("minh_chung")?.trim() || null,
               ghi_chu: formData.get("ghi_chu")?.trim() || null,
               folder_name: folderName.trim(),
-              file_name: file.name,
-              file_path: fullFilePath,
+              file_name: filePaths.originalFileName, // Tên file gốc
+              file_path: filePaths.displayPath, // Path hiển thị
+              storage_path: filePaths.storagePath, // Path thực tế trong storage
               file_size: file.size,
-              file_type: file.type || fileExtension,
+              file_type: file.type || file.name.split(".").pop(),
               created_at: new Date().toISOString(),
             };
 
@@ -705,7 +768,7 @@
               // Nếu lưu DB thất bại, xóa file đã upload
               await supabase.storage
                 .from(SUPABASE_BUCKET)
-                .remove([fullFilePath]);
+                .remove([filePaths.storagePath]);
               throw new Error(`Lỗi lưu thông tin: ${dbError.message}`);
             }
 
