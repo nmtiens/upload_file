@@ -474,38 +474,15 @@
         };
       }
 
-      // Hàm lấy folders từ database
-      async function getFoldersFromDatabase() {
-        try {
-          const { data, error } = await supabase
-            .from("submissions")
-            .select("folder_name")
-            .not("folder_name", "is", null)
-            .not("folder_name", "eq", "");
-
-          if (error) {
-            throw error;
-          }
-
-          // Lấy danh sách unique folders
-          const uniqueFolders = [
-            ...new Set(
-              data.map((item) => item.folder_name?.trim()).filter(Boolean)
-            ),
-          ];
-          return uniqueFolders;
-        } catch (error) {
-          console.error("Database query error:", error);
-          return [];
-        }
-      }
-
-      // Hàm lấy folders từ storage
+      // Hàm lấy folders từ storage (chỉ lấy từ storage)
       async function getFoldersFromStorage() {
         try {
           const { data, error } = await supabase.storage
             .from(SUPABASE_BUCKET)
-            .list("", { limit: 1000 });
+            .list("", {
+              limit: 1000,
+              offset: 0,
+            });
 
           if (error) {
             throw error;
@@ -513,20 +490,20 @@
 
           const storageFolders = new Set();
 
+          // Lặp qua tất cả items trong storage
           data.forEach((item) => {
             const fileName = item.name;
-            let folderName = null;
 
-            // Kiểm tra nếu là file trong subfolder
+            // Kiểm tra nếu là file trong subfolder (có chứa dấu /)
             if (fileName.includes("/")) {
-              folderName = fileName.split("/")[0];
-            } else if (!fileName.includes(".")) {
-              // Không có extension, có thể là folder
-              folderName = fileName;
+              const folderName = fileName.split("/")[0];
+              if (folderName && folderName.trim()) {
+                storageFolders.add(folderName.trim());
+              }
             }
-
-            if (folderName && folderName.trim()) {
-              storageFolders.add(folderName.trim());
+            // Kiểm tra nếu là folder (không có extension)
+            else if (!fileName.includes(".") && fileName.trim()) {
+              storageFolders.add(fileName.trim());
             }
           });
 
@@ -537,7 +514,7 @@
         }
       }
 
-      // Hàm load folders và cập nhật dropdown
+      // Hàm load folders và cập nhật dropdown (chỉ từ storage)
       async function loadFolders() {
         const folderSelect = document.getElementById("folder_select");
 
@@ -546,28 +523,35 @@
           folderSelect.innerHTML = '<option value="">⏳ Đang tải...</option>';
           folderSelect.disabled = true;
 
-          // Lấy dữ liệu từ cả hai nguồn
-          const [databaseFolders, storageFolders] = await Promise.all([
-            getFoldersFromDatabase(),
-            getFoldersFromStorage(),
-          ]);
+          // Chỉ lấy dữ liệu từ storage
+          const storageFolders = await getFoldersFromStorage();
 
-          // Kết hợp và sắp xếp danh sách folders
-          const allFolders = new Set([...databaseFolders, ...storageFolders]);
-          const sortedFolders = Array.from(allFolders).sort();
+          // Sắp xếp danh sách folders
+          const sortedFolders = storageFolders.sort();
 
           // Cập nhật dropdown
           folderSelect.innerHTML =
             '<option value="">📁 Chọn thư mục...</option>';
 
-          sortedFolders.forEach((folderName) => {
+          if (sortedFolders.length === 0) {
             const option = document.createElement("option");
-            option.value = folderName;
-            option.textContent = `📁 ${folderName}`;
+            option.value = "";
+            option.textContent = "📁 Chưa có thư mục nào";
+            option.disabled = true;
             folderSelect.appendChild(option);
-          });
+          } else {
+            sortedFolders.forEach((folderName) => {
+              const option = document.createElement("option");
+              option.value = folderName;
+              option.textContent = `📁 ${folderName}`;
+              folderSelect.appendChild(option);
+            });
+          }
 
-          showMessage("✅ Tải danh sách thư mục thành công!", "success");
+          showMessage(
+            `✅ Tải thành công ${sortedFolders.length} thư mục từ storage!`,
+            "success"
+          );
         } catch (error) {
           console.error("Error loading folders:", error);
           folderSelect.innerHTML =
@@ -811,7 +795,7 @@
           return;
         }
 
-        // Auto load folders
+        // Auto load folders từ storage
         await loadFolders();
       });
 
