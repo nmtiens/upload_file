@@ -14,185 +14,139 @@
 
       body {
         font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        line-height: 1.6;
-        color: #333;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         min-height: 100vh;
         padding: 20px;
+        line-height: 1.6;
       }
 
       .container {
         max-width: 800px;
         margin: 0 auto;
-        background: white;
-        border-radius: 15px;
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 20px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        backdrop-filter: blur(10px);
         overflow: hidden;
       }
 
       .header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(45deg, #4f46e5, #7c3aed);
         color: white;
-        padding: 30px;
+        padding: 40px 30px;
         text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .header::before {
+        content: "";
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(
+          circle,
+          rgba(255, 255, 255, 0.1) 0%,
+          transparent 70%
+        );
+        animation: float 6s ease-in-out infinite;
+      }
+
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(0px) rotate(0deg);
+        }
+        50% {
+          transform: translateY(-20px) rotate(180deg);
+        }
       }
 
       .header h1 {
         font-size: 2.5em;
         margin-bottom: 10px;
-        font-weight: 300;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        position: relative;
+        z-index: 1;
       }
 
       .header p {
         font-size: 1.1em;
         opacity: 0.9;
+        position: relative;
+        z-index: 1;
       }
 
       .form-container {
-        padding: 40px;
+        padding: 40px 30px;
       }
 
       .form-group {
         margin-bottom: 25px;
-      }
-
-      label {
-        display: block;
-        margin-bottom: 8px;
-        font-weight: 600;
-        color: #555;
-        font-size: 1.1em;
-      }
-
-      .required {
-        color: #e74c3c;
-      }
-
-      input[type="text"],
-      input[type="number"],
-      input[type="file"],
-      textarea,
-      select {
-        width: 100%;
-        padding: 12px 15px;
-        border: 2px solid #ddd;
-        border-radius: 8px;
-        font-size: 1em;
-        transition: all 0.3s ease;
-        font-family: inherit;
-      }
-
-      input[type="text"]:focus,
-      input[type="number"]:focus,
-      input[type="file"]:focus,
-      textarea:focus,
-      select:focus {
-        outline: none;
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        transform: translateY(-2px);
-      }
-
-      textarea {
-        resize: vertical;
-        min-height: 100px;
-      }
-
-      .file-input-wrapper {
         position: relative;
-        display: inline-block;
-        width: 100%;
-      }
-
-      .file-input-wrapper input[type="file"] {
-        opacity: 0;
-        position: absolute;
-        z-index: -1;
-      }
-
-      .file-input-label {
-        display: inline-block;
-        padding: 12px 20px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        text-align: center;
-        width: 100%;
-      }
-
-      .file-input-label:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
-      }
-
-      .submit-btn {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 15px 30px;
-        font-size: 1.2em;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        width: 100%;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-      }
-
-      .submit-btn:hover:not(:disabled) {
-        transform: translateY(-3px);
-        box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
-      }
-
-      .submit-btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-        transform: none;
-      }
-
-      .submit-btn:active {
-        transform: translateY(-1px);
-      }
-
-      .message {
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-        display: none;
-        position: relative;
-      }
-
-      .message.success {
-        background: #d4edda;
-        color: #155724;
-        border: 1px solid #c3e6cb;
-      }
-
-      .message.error {
-        background: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
-      }
-
-      .message.info {
-        background: #d1ecf1;
-        color: #0c5460;
-        border: 1px solid #bee5eb;
       }
 
       .form-row {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 20px;
+        margin-bottom: 25px;
+      }
+
+      @media (max-width: 768px) {
+        .form-row {
+          grid-template-columns: 1fr;
+          gap: 15px;
+        }
+      }
+
+      label {
+        display: block;
+        font-weight: 600;
+        color: #374151;
+        margin-bottom: 8px;
+        font-size: 0.95em;
+      }
+
+      .required {
+        color: #ef4444;
+        font-weight: bold;
+      }
+
+      input[type="text"],
+      input[type="number"],
+      select,
+      textarea {
+        width: 100%;
+        padding: 12px 16px;
+        border: 2px solid #e5e7eb;
+        border-radius: 12px;
+        font-size: 1em;
+        transition: all 0.3s ease;
+        background: white;
+      }
+
+      input[type="text"]:focus,
+      input[type="number"]:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #4f46e5;
+        box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        transform: translateY(-2px);
+      }
+
+      textarea {
+        min-height: 100px;
+        resize: vertical;
       }
 
       .folder-selection {
         display: flex;
         gap: 10px;
-        align-items: flex-end;
+        align-items: center;
       }
 
       .folder-select {
@@ -200,78 +154,356 @@
       }
 
       .refresh-folder-btn {
-        background: #17a2b8;
+        background: linear-gradient(45deg, #10b981, #059669);
         color: white;
         border: none;
-        padding: 12px 15px;
-        border-radius: 8px;
+        padding: 12px 16px;
+        border-radius: 12px;
+        font-size: 1.2em;
         cursor: pointer;
         transition: all 0.3s ease;
-        font-size: 1em;
+        min-width: 50px;
       }
 
       .refresh-folder-btn:hover {
-        background: #138496;
+        transform: translateY(-2px) rotate(180deg);
+        box-shadow: 0 8px 15px rgba(16, 185, 129, 0.3);
+      }
+
+      .file-input-wrapper {
+        position: relative;
+        overflow: hidden;
+        display: inline-block;
+        width: 100%;
+      }
+
+      .file-input-wrapper input[type="file"] {
+        position: absolute;
+        left: -9999px;
+        opacity: 0;
+      }
+
+      .file-input-label {
+        display: block;
+        padding: 20px;
+        background: linear-gradient(45deg, #f3f4f6, #e5e7eb);
+        border: 2px dashed #9ca3af;
+        border-radius: 12px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-weight: 500;
+        color: #6b7280;
+      }
+
+      .file-input-label:hover {
+        background: linear-gradient(45deg, #e5e7eb, #d1d5db);
+        border-color: #4f46e5;
+        color: #4f46e5;
         transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(23, 162, 184, 0.3);
       }
 
       .file-selected {
-        margin-top: 10px;
-        padding: 10px;
-        background: #e8f5e8;
-        border-radius: 5px;
-        color: #2d5d2d;
         display: none;
+        margin-top: 15px;
+        padding: 15px;
+        background: linear-gradient(45deg, #ecfdf5, #d1fae5);
+        border: 1px solid #a7f3d0;
+        border-radius: 12px;
+        color: #065f46;
+        font-size: 0.9em;
+        animation: slideIn 0.3s ease;
       }
 
-      .file-info {
-        margin-top: 5px;
-        font-size: 0.9em;
-        color: #666;
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
 
       .progress-bar {
-        width: 100%;
-        height: 6px;
-        background: #f0f0f0;
-        border-radius: 3px;
-        overflow: hidden;
-        margin-top: 10px;
         display: none;
+        width: 100%;
+        height: 8px;
+        background: #e5e7eb;
+        border-radius: 4px;
+        overflow: hidden;
+        margin-top: 15px;
+        box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
       }
 
       .progress-fill {
         height: 100%;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(90deg, #4f46e5, #7c3aed);
         width: 0%;
         transition: width 0.3s ease;
+        border-radius: 4px;
+        position: relative;
+        overflow: hidden;
       }
 
-      @media (max-width: 768px) {
-        .form-row {
-          grid-template-columns: 1fr;
-        }
+      .progress-fill::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        right: 0;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(255, 255, 255, 0.3),
+          transparent
+        );
+        animation: shimmer 2s infinite;
+      }
 
-        .folder-selection {
-          flex-direction: column;
-          align-items: stretch;
+      @keyframes shimmer {
+        0% {
+          transform: translateX(-100%);
         }
+        100% {
+          transform: translateX(100%);
+        }
+      }
 
+      .submit-btn {
+        width: 100%;
+        padding: 16px;
+        background: linear-gradient(45deg, #4f46e5, #7c3aed);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        font-size: 1.1em;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        margin-top: 30px;
+        box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3);
+      }
+
+      .submit-btn:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 25px rgba(79, 70, 229, 0.4);
+      }
+
+      .submit-btn:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .message {
+        display: none;
+        padding: 15px 20px;
+        margin-bottom: 20px;
+        border-radius: 12px;
+        font-weight: 500;
+        position: relative;
+        overflow: hidden;
+        animation: messageSlide 0.5s ease;
+      }
+
+      @keyframes messageSlide {
+        from {
+          opacity: 0;
+          transform: translateY(-20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .message.success {
+        background: linear-gradient(45deg, #10b981, #059669);
+        color: white;
+        border: none;
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+      }
+
+      .message.error {
+        background: linear-gradient(45deg, #ef4444, #dc2626);
+        color: white;
+        border: none;
+        box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+      }
+
+      .message::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(255, 255, 255, 0.2),
+          transparent
+        );
+        animation: messageShimmer 3s infinite;
+      }
+
+      @keyframes messageShimmer {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(100%);
+        }
+      }
+
+      /* Success Animation */
+      .success-animation {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1000;
+        pointer-events: none;
+      }
+
+      .success-checkmark {
+        width: 100px;
+        height: 100px;
+        background: linear-gradient(45deg, #10b981, #059669);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 0 30px rgba(16, 185, 129, 0.5);
+        animation: successPop 0.8s ease;
+      }
+
+      @keyframes successPop {
+        0% {
+          transform: scale(0);
+          opacity: 0;
+        }
+        50% {
+          transform: scale(1.2);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      .success-checkmark::before {
+        content: "✓";
+        color: white;
+        font-size: 3em;
+        font-weight: bold;
+        animation: checkmarkDraw 0.5s ease 0.3s both;
+      }
+
+      @keyframes checkmarkDraw {
+        0% {
+          transform: scale(0);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
+
+      /* Confetti Animation */
+      .confetti {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 999;
+      }
+
+      .confetti-piece {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: #4f46e5;
+        animation: confettiFall 3s linear infinite;
+      }
+
+      @keyframes confettiFall {
+        0% {
+          transform: translateY(-100vh) rotate(0deg);
+          opacity: 1;
+        }
+        100% {
+          transform: translateY(100vh) rotate(360deg);
+          opacity: 0;
+        }
+      }
+
+      /* Responsive Design */
+      @media (max-width: 600px) {
         .container {
           margin: 10px;
-        }
-
-        .form-container {
-          padding: 20px;
+          border-radius: 15px;
         }
 
         .header {
-          padding: 20px;
+          padding: 30px 20px;
         }
 
         .header h1 {
           font-size: 2em;
+        }
+
+        .form-container {
+          padding: 30px 20px;
+        }
+
+        .folder-selection {
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .refresh-folder-btn {
+          width: 100%;
+        }
+      }
+
+      /* Loading Animation */
+      .loading-spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 2px solid #ffffff;
+        border-radius: 50%;
+        border-top-color: transparent;
+        animation: spin 1s linear infinite;
+        margin-right: 10px;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Pulse Animation for Required Fields */
+      .form-group.required input:invalid {
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse {
+        0% {
+          border-color: #e5e7eb;
+        }
+        50% {
+          border-color: #ef4444;
+        }
+        100% {
+          border-color: #e5e7eb;
         }
       }
     </style>
@@ -288,14 +520,14 @@
 
         <form id="uploadForm" enctype="multipart/form-data">
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group required">
               <label for="ho_ten"
                 >Họ và Tên <span class="required">*</span></label
               >
               <input type="text" id="ho_ten" name="ho_ten" required />
             </div>
 
-            <div class="form-group">
+            <div class="form-group required">
               <label for="khoa_phong"
                 >Khoa/Phòng <span class="required">*</span></label
               >
@@ -314,7 +546,7 @@
             </div>
           </div>
 
-          <div class="form-group">
+          <div class="form-group required">
             <label for="ten_de_tai"
               >Tên Đề Tài <span class="required">*</span></label
             >
@@ -349,8 +581,7 @@
             ></textarea>
           </div>
 
-          <!-- Chọn thư mục -->
-          <div class="form-group">
+          <div class="form-group required">
             <label
               >📁 Chọn Thư Mục Lưu Trữ <span class="required">*</span></label
             >
@@ -370,8 +601,7 @@
             </div>
           </div>
 
-          <!-- File upload -->
-          <div class="form-group">
+          <div class="form-group required">
             <label>Tải Lên Tệp Tin <span class="required">*</span></label>
             <div class="file-input-wrapper">
               <input
@@ -409,23 +639,59 @@
         SUPABASE_ANON_KEY
       );
 
+      // Hàm tạo hiệu ứng confetti
+      function createConfetti() {
+        const confetti = document.createElement("div");
+        confetti.className = "confetti";
+        document.body.appendChild(confetti);
+
+        const colors = ["#4f46e5", "#7c3aed", "#10b981", "#f59e0b", "#ef4444"];
+
+        for (let i = 0; i < 100; i++) {
+          const piece = document.createElement("div");
+          piece.className = "confetti-piece";
+          piece.style.left = Math.random() * 100 + "%";
+          piece.style.backgroundColor =
+            colors[Math.floor(Math.random() * colors.length)];
+          piece.style.animationDelay = Math.random() * 2 + "s";
+          piece.style.animationDuration = Math.random() * 2 + 2 + "s";
+          confetti.appendChild(piece);
+        }
+
+        setTimeout(() => {
+          document.body.removeChild(confetti);
+        }, 4000);
+      }
+
+      // Hàm hiển thị animation thành công
+      function showSuccessAnimation() {
+        const successDiv = document.createElement("div");
+        successDiv.className = "success-animation";
+        successDiv.innerHTML = '<div class="success-checkmark"></div>';
+        document.body.appendChild(successDiv);
+
+        createConfetti();
+
+        setTimeout(() => {
+          successDiv.style.animation = "successPop 0.5s ease reverse";
+          setTimeout(() => {
+            document.body.removeChild(successDiv);
+          }, 500);
+        }, 2000);
+      }
+
       // Hàm sanitize tên file để tránh lỗi với ký tự đặc biệt
       function sanitizeFileName(fileName) {
         const extension = fileName.split(".").pop();
         const baseName = fileName.replace(/\.[^/.]+$/, "");
 
-        // Chuyển đổi ký tự tiếng Việt thành không dấu và xóa ký tự đặc biệt
         const cleanBaseName = baseName
-          // Chuyển đổi ký tự tiếng Việt (giữ nguyên chữ hoa/thường)
           .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "") // Loại bỏ dấu
-          .replace(/đ/g, "d") // Chuyển đ thành d
-          .replace(/Đ/g, "D") // Chuyển Đ thành D
-          // Xóa ký tự đặc biệt (chỉ giữ lại chữ cái, số, dấu gạch dưới, dấu gạch ngang)
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/đ/g, "d")
+          .replace(/Đ/g, "D")
           .replace(/[^a-zA-Z0-9_-]/g, "")
-          // Loại bỏ nhiều dấu gạch dưới hoặc gạch ngang liên tiếp
           .replace(/[-_]+/g, (match) => match[0])
-          // Loại bỏ dấu gạch ở đầu và cuối
           .replace(/^[-_]+|[-_]+$/g, "");
 
         return cleanBaseName
@@ -433,48 +699,38 @@
           : `file.${extension}`;
       }
 
-      // Hàm sanitize folder name
       function sanitizeFolderName(folderName) {
-        return (
-          folderName
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "") // Loại bỏ dấu
-            .replace(/đ/g, "d")
-            .replace(/Đ/g, "D")
-            // Xóa ký tự đặc biệt (chỉ giữ lại chữ cái, số, dấu gạch dưới, dấu gạch ngang)
-            .replace(/[^a-zA-Z0-9_-]/g, "")
-            .replace(/[-_]+/g, (match) => match[0])
-            .replace(/^[-_]+|[-_]+$/g, "")
-        );
+        return folderName
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/đ/g, "d")
+          .replace(/Đ/g, "D")
+          .replace(/[^a-zA-Z0-9_-]/g, "")
+          .replace(/[-_]+/g, (match) => match[0])
+          .replace(/^[-_]+|[-_]+$/g, "");
       }
 
-      // Hàm tạo file path an toàn
       function createSafeFilePath(folderName, fileName) {
         const timestamp = new Date().getTime();
         const randomStr = Math.random().toString(36).substring(2, 8);
 
-        // Sanitize tên file và folder
         const safeFileName = sanitizeFileName(fileName);
         const safeFolderName = sanitizeFolderName(folderName);
 
         const extension = safeFileName.split(".").pop();
         const baseName = safeFileName.replace(/\.[^/.]+$/, "");
 
-        // Tạo tên file unique
         const uniqueFileName = `${baseName}_${timestamp}_${randomStr}.${extension}`;
-
-        // Tạo path hoàn toàn an toàn cho storage
         const storagePath = `${safeFolderName}/${uniqueFileName}`;
 
         return {
-          displayPath: `${folderName}/${fileName}`, // Path gốc để hiển thị
-          storagePath: storagePath, // Path an toàn cho storage
+          displayPath: `${folderName}/${fileName}`,
+          storagePath: storagePath,
           uniqueFileName: uniqueFileName,
-          originalFileName: fileName, // Tên file gốc
+          originalFileName: fileName,
         };
       }
 
-      // Hàm lấy folders từ storage (chỉ lấy từ storage)
       async function getFoldersFromStorage() {
         try {
           const { data, error } = await supabase.storage
@@ -490,19 +746,14 @@
 
           const storageFolders = new Set();
 
-          // Lặp qua tất cả items trong storage
           data.forEach((item) => {
             const fileName = item.name;
-
-            // Kiểm tra nếu là file trong subfolder (có chứa dấu /)
             if (fileName.includes("/")) {
               const folderName = fileName.split("/")[0];
               if (folderName && folderName.trim()) {
                 storageFolders.add(folderName.trim());
               }
-            }
-            // Kiểm tra nếu là folder (không có extension)
-            else if (!fileName.includes(".") && fileName.trim()) {
+            } else if (!fileName.includes(".") && fileName.trim()) {
               storageFolders.add(fileName.trim());
             }
           });
@@ -514,22 +765,19 @@
         }
       }
 
-      // Hàm load folders và cập nhật dropdown (chỉ từ storage)
       async function loadFolders() {
         const folderSelect = document.getElementById("folder_select");
+        const refreshBtn = document.querySelector(".refresh-folder-btn");
 
         try {
-          // Hiển thị loading state
           folderSelect.innerHTML = '<option value="">⏳ Đang tải...</option>';
           folderSelect.disabled = true;
+          refreshBtn.style.transform = "rotate(0deg)";
+          refreshBtn.style.animation = "spin 1s linear infinite";
 
-          // Chỉ lấy dữ liệu từ storage
           const storageFolders = await getFoldersFromStorage();
-
-          // Sắp xếp danh sách folders
           const sortedFolders = storageFolders.sort();
 
-          // Cập nhật dropdown
           folderSelect.innerHTML =
             '<option value="">📁 Chọn thư mục...</option>';
 
@@ -559,17 +807,16 @@
           showMessage(`❌ Lỗi tải thư mục: ${error.message}`, "error");
         } finally {
           folderSelect.disabled = false;
+          refreshBtn.style.animation = "none";
         }
       }
 
-      // Hàm hiển thị thông báo
       function showMessage(message, type) {
         const messageDiv = document.getElementById("message");
         messageDiv.textContent = message;
         messageDiv.className = `message ${type}`;
         messageDiv.style.display = "block";
 
-        // Tự động ẩn sau 5 giây
         setTimeout(() => {
           messageDiv.style.display = "none";
         }, 5000);
@@ -581,7 +828,6 @@
         const file = e.target.files[0];
 
         if (file) {
-          // Kiểm tra kích thước file (giới hạn 50MB)
           const maxSize = 50 * 1024 * 1024; // 50MB
           if (file.size > maxSize) {
             showMessage(
@@ -593,7 +839,6 @@
             return;
           }
 
-          // Kiểm tra định dạng file
           const allowedTypes = [
             "text/plain",
             "application/pdf",
@@ -637,11 +882,11 @@
 
           const fileSize = (file.size / 1024 / 1024).toFixed(2);
           fileSelected.innerHTML = `
-              <strong>📎 File đã chọn:</strong><br>
-              • Tên: ${file.name}<br>
-              • Kích thước: ${fileSize} MB<br>
-              • Loại: ${file.type || fileExtension.toUpperCase()}
-            `;
+            <strong>📎 File đã chọn:</strong><br>
+            • Tên: ${file.name}<br>
+            • Kích thước: ${fileSize} MB<br>
+            • Loại: ${file.type || fileExtension.toUpperCase()}
+          `;
           fileSelected.style.display = "block";
           showMessage("✅ File đã được chọn thành công!", "success");
         } else {
@@ -660,20 +905,17 @@
           const progressFill = document.getElementById("progressFill");
 
           try {
-            // Disable submit button
             submitBtn.disabled = true;
-            submitBtn.textContent = "⏳ Đang xử lý...";
+            submitBtn.innerHTML =
+              '<span class="loading-spinner"></span>Đang xử lý...';
 
-            // Hiển thị progress bar
             progressBar.style.display = "block";
             progressFill.style.width = "10%";
 
-            // Lấy dữ liệu form
             const formData = new FormData(e.target);
             const file = formData.get("file");
             const folderName = formData.get("folder");
 
-            // Validation chi tiết
             if (!file || file.size === 0) {
               throw new Error("Vui lòng chọn file để upload!");
             }
@@ -682,7 +924,6 @@
               throw new Error("Vui lòng chọn thư mục!");
             }
 
-            // Kiểm tra các trường bắt buộc
             const requiredFields = ["ho_ten", "khoa_phong", "ten_de_tai"];
             for (let field of requiredFields) {
               const value = formData.get(field);
@@ -693,20 +934,8 @@
 
             progressFill.style.width = "30%";
 
-            // Tạo file path an toàn
             const filePaths = createSafeFilePath(folderName, file.name);
 
-            console.log("Uploading file:", {
-              originalName: file.name,
-              displayPath: filePaths.displayPath,
-              storagePath: filePaths.storagePath,
-              uniqueName: filePaths.uniqueFileName,
-              size: file.size,
-              type: file.type,
-              folderName: folderName,
-            });
-
-            // Upload file lên Supabase Storage với path đã được sanitize
             const { data: uploadData, error: uploadError } =
               await supabase.storage
                 .from(SUPABASE_BUCKET)
@@ -724,7 +953,6 @@
             console.log("Upload successful:", uploadData);
             progressFill.style.width = "70%";
 
-            // Lưu thông tin vào database
             const submissionData = {
               ho_ten: formData.get("ho_ten").trim(),
               khoa_phong: formData.get("khoa_phong").trim(),
@@ -734,9 +962,9 @@
               minh_chung: formData.get("minh_chung")?.trim() || null,
               ghi_chu: formData.get("ghi_chu")?.trim() || null,
               folder_name: folderName.trim(),
-              file_name: filePaths.originalFileName, // Tên file gốc
-              file_path: filePaths.displayPath, // Path hiển thị
-              storage_path: filePaths.storagePath, // Path thực tế trong storage
+              file_name: filePaths.originalFileName,
+              file_path: filePaths.displayPath,
+              storage_path: filePaths.storagePath,
               file_size: file.size,
               file_type: file.type || file.name.split(".").pop(),
               created_at: new Date().toISOString(),
@@ -749,7 +977,6 @@
 
             if (dbError) {
               console.error("Database error:", dbError);
-              // Nếu lưu DB thất bại, xóa file đã upload
               await supabase.storage
                 .from(SUPABASE_BUCKET)
                 .remove([filePaths.storagePath]);
@@ -759,6 +986,8 @@
             progressFill.style.width = "100%";
             console.log("Database save successful:", dbData);
 
+            // Hiển thị animation thành công
+            showSuccessAnimation();
             showMessage("🎉 Upload và lưu thông tin thành công!", "success");
 
             // Reset form
@@ -771,9 +1000,8 @@
             console.error("Upload process error:", error);
             showMessage(`❌ ${error.message}`, "error");
           } finally {
-            // Reset UI
             submitBtn.disabled = false;
-            submitBtn.textContent = "🚀 Gửi Thông Tin";
+            submitBtn.innerHTML = "🚀 Gửi Thông Tin";
 
             setTimeout(() => {
               progressBar.style.display = "none";
@@ -786,7 +1014,6 @@
       document.addEventListener("DOMContentLoaded", async function () {
         console.log("Page loaded, initializing...");
 
-        // Kiểm tra cấu hình
         if (SUPABASE_URL.includes("YOUR_SUPABASE_URL")) {
           showMessage(
             "⚠️ Vui lòng cấu hình Supabase URL và API Key trong code",
@@ -795,7 +1022,6 @@
           return;
         }
 
-        // Auto load folders từ storage
         await loadFolders();
       });
 
